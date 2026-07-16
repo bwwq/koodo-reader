@@ -42,8 +42,8 @@ export function isOPDSNavigationLink(link: OPDSLink): boolean {
 
 function normalizeSearchTemplate(href: string): string {
   return href
-    .replace("{?query}", "?query={searchTerms}")
-    .replace("{?q}", "?q={searchTerms}");
+    .replace(/(?:\{|%7B)\?query(?:\}|%7D)/i, "?query={searchTerms}")
+    .replace(/(?:\{|%7B)\?q(?:\}|%7D)/i, "?q={searchTerms}");
 }
 
 // Query Dublin Core elements across dc: and dcterms: namespaces.
