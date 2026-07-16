@@ -8,6 +8,7 @@ import SortDialog from "../../components/dialogs/sortBookDialog";
 import LocalFileDialog from "../../components/dialogs/localFileDialog";
 import ImportDialog from "../../components/dialogs/importDialog";
 import OPDSDialog from "../../components/dialogs/opdsDialog";
+import SourceSearchDialog from "../../components/dialogs/sourceSearchDialog";
 import { ManagerProps, ManagerState } from "./interface";
 import { Trans } from "react-i18next";
 import SettingDialog from "../../components/dialogs/settingDialog";
@@ -256,6 +257,7 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
             this.props.isSettingOpen ||
             this.props.isOpenImportDialog ||
             this.props.isOpenOPDSDialog ||
+            this.props.isOpenSourceSearchDialog ||
             this.props.isOpenSortShelfDialog ||
             this.props.isShowNew ||
             this.props.isOpenDeleteDialog ||
@@ -300,6 +302,7 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
         {this.props.isOpenLocalFileDialog && <LocalFileDialog />}
         {this.props.isOpenImportDialog && <ImportDialog />}
         {this.props.isOpenOPDSDialog && <OPDSDialog />}
+        {this.props.isOpenSourceSearchDialog && <SourceSearchDialog />}
         {this.props.isOpenSortShelfDialog && <SortShelfDialog />}
         {this.props.isSettingOpen && <SettingDialog />}
         {this.props.isDetailDialog && <DetailDialog />}

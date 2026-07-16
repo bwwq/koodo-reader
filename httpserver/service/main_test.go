@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -446,5 +447,106 @@ func TestFileStorageUsesServiceAccountsAndIsIsolated(t *testing.T) {
 	wrongPassword := downloadStorageFile(t, "files-user", "wrong-password")
 	if wrongPassword.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong password accessed storage: %d", wrongPassword.Code)
+	}
+}
+
+func TestBookSourcesRequireLoginAndAreIsolated(t *testing.T) {
+	openTestDatabase(t)
+	if res := request(t, http.MethodGet, "/v1/book-sources", nil, nil); res.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated source list returned %d", res.Code)
+	}
+	if res := registerAccount(t, "source-admin", "password-123", ""); res.Code != http.StatusOK {
+		t.Fatalf("bootstrap admin: %d %s", res.Code, res.Body.String())
+	}
+	admin := loginAccount(t, "source-admin", "password-123")
+	adminToken := admin["access_token"].(string)
+	created := request(t, http.MethodPost, "/v1/admin/users", map[string]string{
+		"username": "source-user", "password": "password-456",
+	}, bearer(adminToken))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create source user: %d %s", created.Code, created.Body.String())
+	}
+	user := loginAccount(t, "source-user", "password-456")
+	userToken := user["access_token"].(string)
+
+	definitions := []struct {
+		name, token string
+	}{
+		{"Admin source", adminToken},
+		{"User source", userToken},
+	}
+	for _, item := range definitions {
+		res := request(t, http.MethodPost, "/v1/book-sources/import", map[string]any{
+			"bookSourceUrl":  "https://books.example/" + strings.ToLower(strings.ReplaceAll(item.name, " ", "-")),
+			"bookSourceName": item.name,
+			"searchUrl":      "/search?q={{key}}&page={{page}}",
+		}, bearer(item.token))
+		if res.Code != http.StatusOK {
+			t.Fatalf("import %s: %d %s", item.name, res.Code, res.Body.String())
+		}
+	}
+
+	adminList := request(t, http.MethodGet, "/v1/book-sources", nil, bearer(adminToken))
+	userList := request(t, http.MethodGet, "/v1/book-sources", nil, bearer(userToken))
+	if !strings.Contains(adminList.Body.String(), "Admin source") || strings.Contains(adminList.Body.String(), "User source") {
+		t.Fatalf("admin source isolation failed: %s", adminList.Body.String())
+	}
+	if !strings.Contains(userList.Body.String(), "User source") || strings.Contains(userList.Body.String(), "Admin source") {
+		t.Fatalf("user source isolation failed: %s", userList.Body.String())
+	}
+	forbidden := request(t, http.MethodPost, "/v1/book-sources/import", map[string]any{
+		"bookSourceUrl": "https://unsafe.example", "bookSourceName": "Unsafe",
+		"searchUrl": "<js>Packages.java.lang.Runtime.getRuntime()</js>",
+	}, bearer(adminToken))
+	if forbidden.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unsafe source accepted: %d %s", forbidden.Code, forbidden.Body.String())
+	}
+}
+
+func TestBookSourceNetworkPolicyBlocksSpecialAddresses(t *testing.T) {
+	blocked := []string{"127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1", "224.0.0.1", "::1", "fd00::1"}
+	for _, value := range blocked {
+		if !blockedIP(net.ParseIP(value)) {
+			t.Errorf("special address was not blocked: %s", value)
+		}
+	}
+	if blockedIP(net.ParseIP("1.1.1.1")) {
+		t.Fatal("public address was blocked")
+	}
+}
+
+func TestSearchResultCacheIsAccountBound(t *testing.T) {
+	item := cachedSearchResult{ID: "opaque-result", UserID: "user-a", ExpiresAt: time.Now().Add(time.Minute)}
+	cacheSearchResult(item)
+	if _, ok := getCachedResult("user-b", item.ID); ok {
+		t.Fatal("another account could use cached search result")
+	}
+	cacheSearchResult(item)
+	if _, ok := getCachedResult("user-a", item.ID); !ok {
+		t.Fatal("owner could not use cached search result")
+	}
+}
+
+func TestOPDS2ResultsUseRealOpenAccessAcquisition(t *testing.T) {
+	var feed opds2Feed
+	err := json.Unmarshal([]byte(`{
+		"publications":[{
+			"metadata":{"title":"Open Book","author":[{"name":"Public Author"}],"description":"Public domain"},
+			"links":[
+				{"href":"https://archive.example/borrow","type":"application/opds-publication+json","rel":"http://opds-spec.org/acquisition/borrow"},
+				{"href":"https://archive.example/book.pdf","type":"application/pdf","rel":"http://opds-spec.org/acquisition/open-access"}
+			],
+			"images":[{"href":"https://archive.example/cover.jpg","type":"image/jpeg","rel":"cover"}]
+		}]
+	}`), &feed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := convertOPDS2Publications("user-a", bookSource{ID: "archive", Name: "Archive", Type: "opds"}, feed.Publications)
+	if len(items) != 1 || items[0].DownloadURL != "https://archive.example/book.pdf" || items[0].Format != "pdf" {
+		t.Fatalf("unexpected OPDS2 conversion: %#v", items)
+	}
+	if items[0].CoverURL != "https://archive.example/cover.jpg" || strings.Join(items[0].Authors, "") != "Public Author" {
+		t.Fatalf("OPDS2 metadata lost: %#v", items[0])
 	}
 }

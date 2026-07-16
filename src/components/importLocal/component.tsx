@@ -582,6 +582,12 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
     this.props.handleOPDSDialog(true);
   };
 
+  handleSourceSearch = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    this.setState({ isMoreOptionsVisible: false });
+    this.props.handleSourceSearchDialog(true);
+  };
+
   // Handle URL import
   handleURLImport = async (e?: React.MouseEvent, externalUrl?: string) => {
     e?.stopPropagation();
@@ -703,7 +709,7 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
                 : {}
             }
           >
-            {this.props.isCollapsed && this.state.width < 950 ? null : (
+            {(
               <div
                 className="more-import-option"
                 onClick={(e) => {
@@ -884,6 +890,14 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
                     >
                       <span className="more-option-text">
                         <Trans>From OPDS</Trans>
+                      </span>
+                    </div>
+                    <div
+                      className="more-option-item"
+                      onClick={this.handleSourceSearch}
+                    >
+                      <span className="more-option-text">
+                        <Trans>Search from sources</Trans>
                       </span>
                     </div>
                     <div

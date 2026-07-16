@@ -13,6 +13,7 @@ export interface ImportLocalProps extends RouteComponentProps<any> {
   handleDrag: (isDrag: boolean) => void;
   handleImportDialog: (isOpenImportDialog: boolean) => void;
   handleOPDSDialog: (isOpen: boolean) => void;
+  handleSourceSearchDialog: (isOpen: boolean) => void;
   handleImportBookFunc: (importBookFunc: (file: any) => Promise<void>) => void;
   handleReadingBook: (book: BookModel) => void;
   t: (title: string) => string;

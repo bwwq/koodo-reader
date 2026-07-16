@@ -1,0 +1,12 @@
+.git
+**/.git
+node_modules
+release
+android/.gradle
+android/app/build
+android/build
+legado-engine/build
+vendor/reader-legado/.gradle
+vendor/reader-legado/build
+vendor/reader-legado/storage*
+vendor/reader-legado/logs

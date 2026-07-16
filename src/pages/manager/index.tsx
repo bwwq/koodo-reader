@@ -12,6 +12,7 @@ import {
   handleLocalFileDialog,
   handleImportDialog,
   handleOPDSDialog,
+  handleSourceSearchDialog,
   handleFetchNotes,
   handleFetchBookmarks,
   handleEditDialog,
@@ -49,6 +50,7 @@ const mapStateToProps = (state: stateType) => {
     isShowPopupNote: state.manager.isShowPopupNote,
     isOpenImportDialog: state.backupPage.isOpenImportDialog,
     isOpenOPDSDialog: state.backupPage.isOpenOPDSDialog,
+    isOpenSourceSearchDialog: state.backupPage.isOpenSourceSearchDialog,
     isOpenSortShelfDialog: state.backupPage.isOpenSortShelfDialog,
     isOpenLocalFileDialog: state.backupPage.isOpenLocalFileDialog,
   };
@@ -72,6 +74,7 @@ const actionCreator = {
   handleLocalFileDialog,
   handleImportDialog,
   handleOPDSDialog,
+  handleSourceSearchDialog,
   handleReadingState,
   handleShowPopupNote,
   handleShelf,

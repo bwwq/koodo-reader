@@ -1,0 +1,47 @@
+services:
+  service:
+    image: koodo-reader-service:0.4.0
+    container_name: koodo-reader-service
+    restart: unless-stopped
+    environment:
+      SERVICE_PORT: "8081"
+      SERVICE_DB: /data/service.db
+      SERVICE_FILES_DIR: /data/files
+      LEGADO_ENGINE_URL: http://legado-engine:9080
+      LEGADO_ENGINE_TOKEN: ${LEGADO_ENGINE_TOKEN:?set LEGADO_ENGINE_TOKEN}
+      BOOK_SOURCE_PRIVATE_HOSTS: ${BOOK_SOURCE_PRIVATE_HOSTS:-}
+    volumes:
+      - /opt/koodo-reader-service/data:/data
+    networks: [koodo]
+    depends_on:
+      legado-engine:
+        condition: service_healthy
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
+  legado-engine:
+    image: koodo-legado-engine:0.4.0
+    container_name: koodo-legado-engine
+    restart: unless-stopped
+    environment:
+      LEGADO_PORT: "9080"
+      LEGADO_DATA: /data
+      LEGADO_ENGINE_TOKEN: ${LEGADO_ENGINE_TOKEN:?set LEGADO_ENGINE_TOKEN}
+      LEGADO_ALLOWED_PRIVATE_HOSTS: ${BOOK_SOURCE_PRIVATE_HOSTS:-}
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx512m -XX:+ExitOnOutOfMemoryError
+    volumes:
+      - /opt/koodo-reader-service/legado:/data
+    networks: [koodo]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    cpus: 2
+    mem_limit: 768m
+    pids_limit: 256
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
+networks:
+  koodo:
+    name: koodo-reader-net
+    external: true

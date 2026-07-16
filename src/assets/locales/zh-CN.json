@@ -567,6 +567,7 @@
   "Cannot get sync config": "无法获取同步配置",
   "From cloud storage": "从云端导入",
   "From OPDS": "从 OPDS 导入",
+  "Search from sources": "从源搜索",
   "From URL": "从 URL 导入",
   "Enter book download URL or article URL": "请输入图书下载链接或网页文章链接",
   "Please enter a valid http or https URL": "请输入有效的 http 或 https 链接",

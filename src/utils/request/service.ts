@@ -17,6 +17,8 @@ export type ServiceCapability =
   | "sync.data"
   | "sync.koreader"
   | "storage.files"
+  | "source.search"
+  | "source.legado"
   | "storage.oauth";
 
 export interface ApiResponse<T> {

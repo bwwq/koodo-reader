@@ -1,0 +1,60 @@
+name: Source search
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: httpserver/go.mod
+          cache-dependency-path: httpserver/go.sum
+      - name: Format check
+        working-directory: httpserver
+        run: test -z "$(gofmt -l service/*.go)"
+      - name: Test service
+        working-directory: httpserver
+        run: go test ./service
+      - name: Build service image
+        run: docker build -f httpserver/Dockerfile.service -t koodo-reader-service:test httpserver
+
+  legado-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "7.6.4"
+      - name: Build and test pinned Legado engine
+        working-directory: legado-engine
+        env:
+          LEGADO_ALLOWED_PRIVATE_HOSTS: 127.0.0.1
+        run: gradle --no-daemon test shadowJar
+      - name: Build hardened engine image
+        run: docker build -f legado-engine/Dockerfile -t koodo-legado-engine:test .
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: yarn
+      - run: yarn install --ignore-scripts --frozen-lockfile --network-timeout 1000000
+      - name: Type check
+        run: yarn tsc --noEmit
+      - name: React tests
+        run: yarn test --watchAll=false
+      - name: Production build
+        env:
+          DISABLE_ESLINT_PLUGIN: "true"
+        run: yarn build

@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	serviceVersion       = "0.3.0"
+	serviceVersion       = "0.4.0"
 	accessTTL            = 15 * time.Minute
 	refreshTTL           = 30 * 24 * time.Hour
 	passwordRounds       = 120000
@@ -81,6 +81,14 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	cleanupExpiredBookImports()
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			cleanupExpiredBookImports()
+		}
+	}()
 
 	port := env("SERVICE_PORT", "8081")
 	server := &http.Server{
@@ -111,7 +119,21 @@ func envInt64(key string, fallback int64) int64 {
 }
 
 func serviceCapabilities() []string {
-	return []string{"sync.data", "sync.koreader", "storage.files"}
+	capabilities := []string{"sync.data", "sync.koreader", "storage.files", "source.search"}
+	if legadoEngineHealthy() {
+		capabilities = append(capabilities, "source.legado")
+	}
+	return capabilities
+}
+
+func legadoEngineHealthy() bool {
+	client := http.Client{Timeout: time.Second}
+	response, err := client.Get(legadoEngineURL() + "/health")
+	if err != nil {
+		return false
+	}
+	response.Body.Close()
+	return response.StatusCode == http.StatusOK
 }
 
 func requestIP(r *http.Request) string {
@@ -233,6 +255,7 @@ func openDatabase() error {
 			PRIMARY KEY(username, document)
 		)`,
 	}
+	schema = append(schema, initBookSourceSchema()...)
 	for _, statement := range schema {
 		if _, err := db.Exec(statement); err != nil {
 			return err
@@ -262,6 +285,9 @@ func route(w http.ResponseWriter, r *http.Request) {
 	if isFileRoute(r) && !allowRate(r, 600, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "Too many requests", http.StatusTooManyRequests)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/v1/book-") && handleBookSourceRoutes(w, r) {
 		return
 	}
 
@@ -326,7 +352,7 @@ func setCORS(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Vary", "Origin")
 	}
 	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, x-auth-user, x-auth-key")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 }
 
 func isAllowedOrigin(origin string, r *http.Request) bool {

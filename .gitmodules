@@ -1,0 +1,3 @@
+[submodule "vendor/reader-legado"]
+	path = vendor/reader-legado
+	url = https://github.com/hectorqin/reader-legado.git
