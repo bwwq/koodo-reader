@@ -1,0 +1,19 @@
+{
+  "bookSourceUrl": "https://openlibrary.org",
+  "bookSourceName": "Open Library（搜索演示）",
+  "bookSourceGroup": "GitHub 演示 · 图书目录",
+  "bookSourceComment": "适配 Koodo 自托管 Legado 引擎的搜索演示源。搜索结果来自 Open Library；是否可借阅或下载以 Open Library 的实际馆藏状态为准。",
+  "bookSourceType": 0,
+  "enabled": true,
+  "searchUrl": "https://openlibrary.org/search.json?q={{key}}&page={{page}}&limit=20",
+  "ruleSearch": {
+    "bookList": "$.docs[*]",
+    "name": "$.title",
+    "author": "$.author_name[0]",
+    "intro": "$.first_sentence[0]",
+    "kind": "$.language[*]",
+    "bookUrl": "$.key",
+    "coverUrl": "<js>result && result.cover_i ? 'https://covers.openlibrary.org/b/id/' + result.cover_i + '-L.jpg' : ''</js>",
+    "lastChapter": "$.first_publish_year"
+  }
+}
