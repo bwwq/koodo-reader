@@ -416,6 +416,12 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
                 placeholder={this.props.t("Enter your API Key")}
                 value={this.state.apiKey}
                 id="ai-api-key-box"
+                name="koodo-ai-api-key"
+                autoComplete="new-password"
+                spellCheck={false}
+                data-1p-ignore
+                data-lpignore="true"
+                data-form-type="other"
                 onContextMenu={() => {
                   handleContextMenu("ai-api-key-box", true);
                 }}
@@ -433,6 +439,8 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
                 className="token-dialog-username-box"
                 placeholder="https://api.example.com/v1/models"
                 value={this.state.modelsEndpoint}
+                name="koodo-model-list-url"
+                autoComplete="off"
                 onChange={(e) =>
                   this.setState({ modelsEndpoint: e.target.value.trim() })
                 }
@@ -519,6 +527,8 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
                 placeholder="https://api.example.com/v1"
                 value={this.state.endpoint}
                 id="ai-endpoint-box"
+                name="koodo-ai-endpoint"
+                autoComplete="off"
                 onContextMenu={() => {
                   handleContextMenu("ai-endpoint-box", true);
                 }}
@@ -539,6 +549,8 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
                 placeholder={this.props.t("Display name of the model")}
                 value={this.state.modelName}
                 id="ai-model-name-box"
+                name="koodo-ai-model-name"
+                autoComplete="off"
                 onContextMenu={() => {
                   handleContextMenu("ai-model-name-box", true);
                 }}
@@ -559,6 +571,8 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
                 )}
                 value={this.state.modelId}
                 id="ai-model-id-box"
+                name="koodo-ai-model-id"
+                autoComplete="off"
                 onContextMenu={() => {
                   handleContextMenu("ai-model-id-box", true);
                 }}

@@ -1191,7 +1191,7 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
             <p className="setting-option-subtitle">
               <Trans>
                 {
-                  "Data in other devices is messed up, but the data in this device is normal. You can reset the sync record in this device, delete the KoodoReader/config folder in the data source(Turn off Online reading data sync if necessary), and sync again. This should resolve the issue"
+                  "If this device has the correct data but another device is out of sync, reset this device's sync records and synchronize again. If you also use a data source, remove its KoodoReader/config folder first."
                 }
               </Trans>
             </p>

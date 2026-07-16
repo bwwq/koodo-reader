@@ -1127,10 +1127,20 @@ export const showTaskProgress = async (
   let timer: any;
   let service = ConfigService.getItem("defaultSyncOption");
   if (!service) {
-    toast(
-      i18n.t("Please add data source in the setting-Sync and backup first")
-    );
-    return null;
+    if (ConfigService.getReaderConfig("isEnableOnlineSync") !== "yes") {
+      toast(
+        i18n.t("Please add data source in the setting-Sync and backup first")
+      );
+      return null;
+    }
+    handleSyncStateChange(true);
+    if (ConfigService.getReaderConfig("hideSyncProgress") !== "yes") {
+      toast.loading(
+        i18n.t("Start syncing") + " (" + i18n.t("Online service") + ")",
+        { id: "syncing", position: "bottom-center" }
+      );
+    }
+    return setInterval(() => undefined, 1000);
   }
   if (isElectron) {
     let tokenConfig = await getCloudConfig(service);
@@ -1209,6 +1219,9 @@ export const showTaskProgress = async (
 export const getTaskStats = async () => {
   let service = ConfigService.getItem("defaultSyncOption");
   if (!service) {
+    if (ConfigService.getReaderConfig("isEnableOnlineSync") === "yes") {
+      return { total: 0, completed: 0, hasFailedTasks: false };
+    }
     toast(
       i18n.t("Please add data source in the setting-Sync and backup first")
     );

@@ -119,6 +119,11 @@ class SearchBox extends React.Component<SearchBoxProps, SearchBoxState> {
           type="text"
           ref={this.searchBoxRef}
           className="header-search-box"
+          name="koodo-library-search"
+          autoComplete="off"
+          data-1p-ignore
+          data-lpignore="true"
+          data-form-type="other"
           onKeyDown={(event) => {
             this.handleKey(event);
           }}

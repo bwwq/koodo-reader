@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,7 +27,7 @@ import (
 )
 
 const (
-	serviceVersion = "0.1.0"
+	serviceVersion = "0.2.0"
 	accessTTL      = 15 * time.Minute
 	refreshTTL     = 30 * 24 * time.Hour
 	passwordRounds = 120000
@@ -140,6 +141,21 @@ func openDatabase() error {
 			updated_at INTEGER NOT NULL,
 			PRIMARY KEY(user_id, type)
 		)`,
+		`CREATE TABLE IF NOT EXISTS koreader_users (
+			username TEXT PRIMARY KEY COLLATE NOCASE,
+			password TEXT NOT NULL,
+			created_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS koreader_progress (
+			username TEXT NOT NULL REFERENCES koreader_users(username) ON DELETE CASCADE,
+			document TEXT NOT NULL,
+			percentage REAL NOT NULL DEFAULT 0,
+			progress TEXT NOT NULL DEFAULT '',
+			device TEXT NOT NULL DEFAULT '',
+			device_id TEXT NOT NULL DEFAULT '',
+			timestamp INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY(username, document)
+		)`,
 	}
 	for _, statement := range schema {
 		if _, err := db.Exec(statement); err != nil {
@@ -187,19 +203,42 @@ func route(w http.ResponseWriter, r *http.Request) {
 		handleListInvites(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/admin/users":
 		handleListUsers(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/users/create":
+		handleKoreaderCreateUser(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/users/auth":
+		handleKoreaderAuth(w, r)
+	case r.Method == http.MethodPut && r.URL.Path == "/syncs/progress":
+		handleKoreaderPutProgress(w, r)
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/syncs/progress/"):
+		handleKoreaderGetProgress(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/healthcheck":
+		writeKoreaderJSON(w, http.StatusOK, map[string]any{"state": "OK"})
 	default:
 		writeAPI(w, http.StatusNotFound, http.StatusNotFound, "接口不存在", nil)
 	}
 }
 
 func setCORS(w http.ResponseWriter, r *http.Request) {
-	origin := r.Header.Get("Origin")
-	if origin != "" {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin != "" && isAllowedOrigin(origin, r) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 	}
-	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, x-auth-user, x-auth-key")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+}
+
+func isAllowedOrigin(origin string, r *http.Request) bool {
+	parsed, err := url.Parse(origin)
+	if err == nil && parsed.Host != "" && strings.EqualFold(parsed.Host, r.Host) {
+		return true
+	}
+	for _, allowed := range strings.Split(os.Getenv("SERVICE_ALLOWED_ORIGINS"), ",") {
+		if strings.EqualFold(strings.TrimRight(strings.TrimSpace(allowed), "/"), strings.TrimRight(origin, "/")) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeAPI(w http.ResponseWriter, status, code int, msg string, data any) {
@@ -220,7 +259,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, target any) bool {
 
 func handleHealth(w http.ResponseWriter) {
 	writeAPI(w, http.StatusOK, 200, "success", map[string]any{
-		"version": serviceVersion, "capabilities": []string{"sync.data"},
+		"version": serviceVersion, "capabilities": []string{"sync.data", "sync.koreader"},
 	})
 }
 
@@ -580,7 +619,7 @@ func adminConfigData() map[string]any {
 	return map[string]any{
 		"registration_mode": setting("registration_mode", "invite"),
 		"service_name":      setting("service_name", "Koodo Reader"),
-		"capabilities":      []string{"sync.data"},
+		"capabilities":      []string{"sync.data", "sync.koreader"},
 	}
 }
 
@@ -726,6 +765,137 @@ func handleListUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeAPI(w, 200, 200, "success", users)
+}
+
+func writeKoreaderJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+func writeKoreaderError(w http.ResponseWriter, status, code int, message string) {
+	writeKoreaderJSON(w, status, map[string]any{"code": code, "message": message})
+}
+
+func koreaderCredentials(r *http.Request) (string, string) {
+	return strings.TrimSpace(r.Header.Get("x-auth-user")), strings.TrimSpace(r.Header.Get("x-auth-key"))
+}
+
+func authenticateKoreader(r *http.Request) string {
+	username, password := koreaderCredentials(r)
+	if username == "" || password == "" || strings.Contains(username, ":") {
+		return ""
+	}
+	var stored string
+	if err := db.QueryRow(`SELECT password FROM koreader_users WHERE username=?`, username).Scan(&stored); err != nil || subtle.ConstantTimeCompare([]byte(stored), []byte(password)) != 1 {
+		return ""
+	}
+	return username
+}
+
+func handleKoreaderCreateUser(w http.ResponseWriter, r *http.Request) {
+	if strings.EqualFold(env("ENABLE_KOREADER_REGISTRATION", "true"), "false") {
+		writeKoreaderError(w, http.StatusPaymentRequired, 2005, "User registration is disabled.")
+		return
+	}
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if !decodeKoreaderBody(w, r, &body) {
+		writeKoreaderError(w, http.StatusForbidden, 2003, "Invalid request")
+		return
+	}
+	body.Username = strings.TrimSpace(body.Username)
+	body.Password = strings.TrimSpace(body.Password)
+	if !usernameExpr.MatchString(body.Username) || body.Password == "" || len(body.Password) > 256 || strings.Contains(body.Username, ":") {
+		writeKoreaderError(w, http.StatusForbidden, 2003, "Invalid request")
+		return
+	}
+	_, err := db.Exec(`INSERT INTO koreader_users(username,password,created_at) VALUES(?,?,?)`, body.Username, body.Password, time.Now().Unix())
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			writeKoreaderError(w, http.StatusPaymentRequired, 2002, "Username is already registered.")
+			return
+		}
+		writeKoreaderError(w, http.StatusBadGateway, 2000, "Unknown server error.")
+		return
+	}
+	writeKoreaderJSON(w, http.StatusCreated, map[string]any{"username": body.Username})
+}
+
+func decodeKoreaderBody(w http.ResponseWriter, r *http.Request, target any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
+	return decoder.Decode(target) == nil
+}
+
+func handleKoreaderAuth(w http.ResponseWriter, r *http.Request) {
+	if authenticateKoreader(r) == "" {
+		writeKoreaderError(w, http.StatusUnauthorized, 2001, "Unauthorized")
+		return
+	}
+	writeKoreaderJSON(w, http.StatusOK, map[string]any{"authorized": "OK"})
+}
+
+func handleKoreaderPutProgress(w http.ResponseWriter, r *http.Request) {
+	username := authenticateKoreader(r)
+	if username == "" {
+		writeKoreaderError(w, http.StatusUnauthorized, 2001, "Unauthorized")
+		return
+	}
+	var body struct {
+		Document   string  `json:"document"`
+		Progress   string  `json:"progress"`
+		Percentage float64 `json:"percentage"`
+		Device     string  `json:"device"`
+		DeviceID   string  `json:"device_id"`
+	}
+	if !decodeKoreaderBody(w, r, &body) || strings.TrimSpace(body.Document) == "" || strings.Contains(body.Document, ":") || body.Progress == "" || body.Device == "" {
+		writeKoreaderError(w, http.StatusForbidden, 2003, "Invalid request")
+		return
+	}
+	timestamp := time.Now().Unix()
+	_, err := db.Exec(`INSERT INTO koreader_progress(username,document,percentage,progress,device,device_id,timestamp)
+		VALUES(?,?,?,?,?,?,?) ON CONFLICT(username,document) DO UPDATE SET percentage=excluded.percentage,
+		progress=excluded.progress,device=excluded.device,device_id=excluded.device_id,timestamp=excluded.timestamp`,
+		username, body.Document, body.Percentage, body.Progress, body.Device, body.DeviceID, timestamp)
+	if err != nil {
+		writeKoreaderError(w, http.StatusBadGateway, 2000, "Unknown server error.")
+		return
+	}
+	writeKoreaderJSON(w, http.StatusOK, map[string]any{"document": body.Document, "timestamp": timestamp})
+}
+
+func handleKoreaderGetProgress(w http.ResponseWriter, r *http.Request) {
+	username := authenticateKoreader(r)
+	if username == "" {
+		writeKoreaderError(w, http.StatusUnauthorized, 2001, "Unauthorized")
+		return
+	}
+	document := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/syncs/progress/"))
+	if document == "" || strings.Contains(document, ":") {
+		writeKoreaderError(w, http.StatusForbidden, 2004, "Field 'document' not provided.")
+		return
+	}
+	var percentage float64
+	var progress, device, deviceID string
+	var timestamp int64
+	err := db.QueryRow(`SELECT percentage,progress,device,device_id,timestamp FROM koreader_progress WHERE username=? AND document=?`, username, document).
+		Scan(&percentage, &progress, &device, &deviceID, &timestamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeKoreaderJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+	if err != nil {
+		writeKoreaderError(w, http.StatusBadGateway, 2000, "Unknown server error.")
+		return
+	}
+	result := map[string]any{"document": document, "percentage": percentage, "progress": progress, "device": device, "timestamp": timestamp}
+	if deviceID != "" {
+		result["device_id"] = deviceID
+	}
+	writeKoreaderJSON(w, http.StatusOK, result)
 }
 
 func randomString(byteLength int) string {

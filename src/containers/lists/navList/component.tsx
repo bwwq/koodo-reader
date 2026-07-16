@@ -372,6 +372,8 @@ class NavList extends React.Component<NavListProps, NavListState> {
             <input
               ref={this.searchInputRef}
               className="book-nav-search-input"
+              name="koodo-reader-navigation-search"
+              autoComplete="off"
               value={this.state.searchKeyword}
               onChange={this.handleSearchChange}
               onCompositionStart={this.handleCompositionStart}

@@ -15,6 +15,7 @@ export type ServiceCapability =
   | "reader.role-analysis"
   | "reader.language-detect"
   | "sync.data"
+  | "sync.koreader"
   | "storage.oauth";
 
 export interface ApiResponse<T> {

@@ -81,12 +81,19 @@ class ConfigUtil {
   public static updateVersions: Record<string, number> = {};
   public static onlineVersions: Record<string, number> = {};
   public static providerMirrorTypes = new Set<string>();
+  public static providerWriteErrors: Error[] = [];
   static resetOnlineState() {
     this.syncData = {};
     this.updateData = {};
     this.updateVersions = {};
     this.onlineVersions = {};
     this.providerMirrorTypes.clear();
+    this.providerWriteErrors = [];
+  }
+  private static recordProviderWriteError(error: unknown) {
+    this.providerWriteErrors.push(
+      error instanceof Error ? error : new Error(String(error))
+    );
   }
   static async downloadConfig(type: string) {
     if (isElectron) {
@@ -147,35 +154,37 @@ class ConfigUtil {
     const envelope = makeEnvelope(content, version);
     this.updateData[type] = content;
     this.updateVersions[type] = this.onlineVersions[type] || 0;
-    if (isElectron) {
-      const { ipcRenderer } = window.require("electron");
-      let service = ConfigService.getItem("defaultSyncOption");
-      if (!service) {
-        return;
-      }
-      let tokenConfig = await getCloudConfig(service);
-      let fs = window.require("fs");
-      if (!fs.existsSync(getStorageLocation() + "/config")) {
-        fs.mkdirSync(getStorageLocation() + "/config", { recursive: true });
-      }
-      fs.writeFileSync(
-        getStorageLocation() + "/config/" + type + ".json",
-        JSON.stringify(envelope)
-      );
+    const service = ConfigService.getItem("defaultSyncOption");
+    if (!service) return;
+    try {
+      if (isElectron) {
+        const { ipcRenderer } = window.require("electron");
+        let tokenConfig = await getCloudConfig(service);
+        let fs = window.require("fs");
+        if (!fs.existsSync(getStorageLocation() + "/config")) {
+          fs.mkdirSync(getStorageLocation() + "/config", { recursive: true });
+        }
+        fs.writeFileSync(
+          getStorageLocation() + "/config/" + type + ".json",
+          JSON.stringify(envelope)
+        );
 
-      await ipcRenderer.invoke("cloud-upload", {
-        ...tokenConfig,
-        fileName: type + ".json",
-        service: service,
-        type: "config",
-        storagePath: getStorageLocation(),
-      });
-    } else {
-      let syncUtil = await SyncService.getSyncUtil();
-      let configBlob = new Blob([JSON.stringify(envelope)], {
-        type: "application/json",
-      });
-      await syncUtil.uploadFile(type + ".json", "config", configBlob);
+        await ipcRenderer.invoke("cloud-upload", {
+          ...tokenConfig,
+          fileName: type + ".json",
+          service,
+          type: "config",
+          storagePath: getStorageLocation(),
+        });
+      } else {
+        let syncUtil = await SyncService.getSyncUtil();
+        let configBlob = new Blob([JSON.stringify(envelope)], {
+          type: "application/json",
+        });
+        await syncUtil.uploadFile(type + ".json", "config", configBlob);
+      }
+    } catch (error) {
+      this.recordProviderWriteError(error);
     }
   }
   static async getSyncData(type: string) {
@@ -193,6 +202,7 @@ class ConfigUtil {
     return null;
   }
   static async updateSyncData() {
+    let onlineSaved = false;
     for (const type of Array.from(this.providerMirrorTypes)) {
       if (type === "sync" || type === "config") {
         await this.uploadConfig(type);
@@ -214,6 +224,7 @@ class ConfigUtil {
         throw new Error(response.msg || "Online sync failed");
       }
       if (response.code === 200) {
+        onlineSaved = true;
         Object.keys(this.updateData).forEach((type) => {
           const savedItem = response.data?.[type];
           this.onlineVersions[type] = savedItem
@@ -222,9 +233,19 @@ class ConfigUtil {
         });
       }
     }
+    const providerErrors = [...this.providerWriteErrors];
     this.syncData = {};
     this.updateData = {};
     this.updateVersions = {};
+    this.providerWriteErrors = [];
+    if (providerErrors.length > 0) {
+      throw new Error(
+        (onlineSaved
+          ? "Online service was saved, but the selected data source could not be updated: "
+          : "The selected data source could not be updated: ") +
+          providerErrors[0].message
+      );
+    }
   }
   static async getCloudConfig(type: string) {
     const [providerRaw, online] = await Promise.all([
@@ -242,7 +263,10 @@ class ConfigUtil {
     if (provider.updated_at > service.updated_at) {
       this.updateData[type] = provider.content;
       this.updateVersions[type] = this.onlineVersions[type];
-    } else if (service.updated_at > provider.updated_at) {
+    } else if (
+      service.updated_at > provider.updated_at &&
+      ConfigService.getItem("defaultSyncOption")
+    ) {
       this.providerMirrorTypes.add(type);
     }
     this.syncData[type] = selected.content;
@@ -341,7 +365,10 @@ class ConfigUtil {
     if (provider.updated_at > service.updated_at) {
       this.updateData[database] = provider.content;
       this.updateVersions[database] = this.onlineVersions[database];
-    } else if (service.updated_at > provider.updated_at) {
+    } else if (
+      service.updated_at > provider.updated_at &&
+      ConfigService.getItem("defaultSyncOption")
+    ) {
       this.providerMirrorTypes.add(database);
     }
     this.syncData[database] = selected.content;
@@ -360,48 +387,54 @@ class ConfigUtil {
     this.updateData[type] = JSON.stringify(data);
     this.updateVersions[type] = this.onlineVersions[type] || 0;
     const meta = { schema: "dual-v1", version, updated_at: Date.now() };
-    if (isElectron) {
-      const { ipcRenderer } = window.require("electron");
-      await ipcRenderer.invoke("close-database", {
-        dbName: type,
-        storagePath: getStorageLocation(),
-      });
-      let service = ConfigService.getItem("defaultSyncOption");
-      if (!service) {
-        return;
+    const service = ConfigService.getItem("defaultSyncOption");
+    if (!service) return;
+    try {
+      if (isElectron) {
+        const { ipcRenderer } = window.require("electron");
+        await ipcRenderer.invoke("close-database", {
+          dbName: type,
+          storagePath: getStorageLocation(),
+        });
+        let tokenConfig = await getCloudConfig(service);
+        const fs = window.require("fs");
+        const configPath = getStorageLocation() + "/config";
+        if (!fs.existsSync(configPath)) {
+          fs.mkdirSync(configPath, { recursive: true });
+        }
+        fs.writeFileSync(
+          configPath + "/" + type + ".meta.json",
+          JSON.stringify(meta)
+        );
+        await ipcRenderer.invoke("cloud-upload", {
+          ...tokenConfig,
+          fileName: type + ".db",
+          service,
+          type: "config",
+          storagePath: getStorageLocation(),
+        });
+        await ipcRenderer.invoke("cloud-upload", {
+          ...tokenConfig,
+          fileName: type + ".meta.json",
+          service,
+          type: "config",
+          storagePath: getStorageLocation(),
+        });
+      } else {
+        let dbBuffer = await DatabaseService.getDbBuffer(type);
+        let dbBlob = new Blob([dbBuffer], {
+          type: CommonTool.getMimeType("db"),
+        });
+        let syncUtil = await SyncService.getSyncUtil();
+        await syncUtil.uploadFile(type + ".db", "config", dbBlob);
+        await syncUtil.uploadFile(
+          type + ".meta.json",
+          "config",
+          new Blob([JSON.stringify(meta)], { type: "application/json" })
+        );
       }
-      let tokenConfig = await getCloudConfig(service);
-      const fs = window.require("fs");
-      const configPath = getStorageLocation() + "/config";
-      if (!fs.existsSync(configPath)) fs.mkdirSync(configPath, { recursive: true });
-      fs.writeFileSync(
-        configPath + "/" + type + ".meta.json",
-        JSON.stringify(meta)
-      );
-      await ipcRenderer.invoke("cloud-upload", {
-        ...tokenConfig,
-        fileName: type + ".db",
-        service: service,
-        type: "config",
-        storagePath: getStorageLocation(),
-      });
-      return await ipcRenderer.invoke("cloud-upload", {
-        ...tokenConfig,
-        fileName: type + ".meta.json",
-        service,
-        type: "config",
-        storagePath: getStorageLocation(),
-      });
-    } else {
-      let dbBuffer = await DatabaseService.getDbBuffer(type);
-      let dbBlob = new Blob([dbBuffer], { type: CommonTool.getMimeType("db") });
-      let syncUtil = await SyncService.getSyncUtil();
-      await syncUtil.uploadFile(type + ".db", "config", dbBlob);
-      await syncUtil.uploadFile(
-        type + ".meta.json",
-        "config",
-        new Blob([JSON.stringify(meta)], { type: "application/json" })
-      );
+    } catch (error) {
+      this.recordProviderWriteError(error);
     }
   }
   static async getNotesByBookKeyAndTypeWithSort(

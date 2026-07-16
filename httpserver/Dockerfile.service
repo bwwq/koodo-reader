@@ -4,6 +4,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY service ./service
+RUN go test ./service
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/koodo-service ./service
 
 FROM alpine:3.22
@@ -13,4 +14,6 @@ USER koodo
 VOLUME ["/data"]
 EXPOSE 8081
 ENV SERVICE_PORT=8081 SERVICE_DB=/data/service.db
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8081/v1/health || exit 1
 ENTRYPOINT ["/usr/local/bin/koodo-service"]

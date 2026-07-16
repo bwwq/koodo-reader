@@ -12,7 +12,7 @@
 
 ## 服务与账号
 
-- `GET /v1/health`：`data` 为 `{ "version": "1.0.0", "capabilities": ["sync.data", "storage.oauth"] }`
+- `GET /v1/health`：`data` 为 `{ "version": "0.2.0", "capabilities": ["sync.data", "sync.koreader"] }`
 - `GET /v1/auth/config`：`data` 为 `{ "registration_mode": "bootstrap" | "admin" | "invite", "service_name": "Koodo Reader" }`
 - `POST /v1/auth/register`：`{ "username", "password", "invite_code" }`
 - `POST /v1/auth/login`：`{ "username", "password", "device" }`
@@ -70,6 +70,39 @@ CREATE TABLE sync_items (
 - 读取两端数据，以 `updated_at` 选择较新的阅读数据；两端版本号相互独立，不跨存储比较版本号。
 - 保存时先写用户选择的存储，再写本接口；在线同步开启但服务端写入失败时，客户端会报告同步失败并保留待写数据。
 - 书籍文件和封面只保存到用户选择的存储，在线服务保存进度、笔记、书签、生词及同步配置。
+
+没有配置其他数据源时，在线服务仍可独立保存上述阅读数据，不会再调用空数据源。配置了数据源后，客户端会先尝试保存数据源，再保存在线服务；其中一端失败不会阻止另一端的保存尝试，界面会报告部分同步失败。
+
+## KOReader 兼容同步
+
+服务同时提供 KOReader Sync Server 兼容接口，并以 `sync.koreader` 声明能力：
+
+- `POST /users/create`
+- `GET /users/auth`
+- `PUT /syncs/progress`
+- `GET /syncs/progress/{document}`
+- `GET /healthcheck`
+
+KOReader 接口使用 `x-auth-user` 与 `x-auth-key` 请求头。KOReader 账号及进度与普通在线服务会话分开保存，进度以 `(username, document)` 隔离。设置 `ENABLE_KOREADER_REGISTRATION=false` 可关闭公开创建 KOReader 账号。
+
+跨域请求默认只允许与请求 Host 相同的来源；额外受信任来源通过逗号分隔的 `SERVICE_ALLOWED_ORIGINS` 配置。
+
+## 独立 API 测试
+
+`httpserver/service/main_test.go` 使用临时 SQLite 数据库直接覆盖账号生命周期、管理员权限、邀请码并发核销、刷新令牌轮换、同步版本冲突、账号隔离、KOReader 隔离和 CORS。构建服务镜像时会自动执行：
+
+```bash
+cd httpserver
+go test ./service
+```
+
+`httpserver/service/smoke_test.py` 是面向完整 HTTP 服务的黑盒测试，包含真实注册、登录、写入、拉取和冲突请求。它要求目标是全新的临时实例，并会在发现目标不是 `bootstrap` 状态时停止，禁止将正式服务当作测试环境：
+
+```bash
+python3 service/smoke_test.py http://127.0.0.1:18082
+```
+
+建议让临时容器只监听回环地址，并使用独立的 `/data/test.db`；测试结束后删除临时容器和数据库。
 
 ## 云存储 OAuth
 

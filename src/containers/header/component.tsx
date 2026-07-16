@@ -347,7 +347,10 @@ class Header extends React.Component<HeaderProps, HeaderState> {
     }
   };
   beforeSync = async (serviceUser: any) => {
-    if (!ConfigService.getItem("defaultSyncOption")) {
+    const defaultSyncOption = ConfigService.getItem("defaultSyncOption");
+    const isOnlineSyncEnabled =
+      ConfigService.getReaderConfig("isEnableOnlineSync") === "yes";
+    if (!defaultSyncOption && !isOnlineSyncEnabled) {
       toast.error(
         this.props.t(
           "Please add data source in the setting-Sync and backup first"
@@ -357,17 +360,15 @@ class Header extends React.Component<HeaderProps, HeaderState> {
       this.props.handleSettingMode("sync");
       return false;
     }
-    let config = await getCloudConfig(
-      ConfigService.getItem("defaultSyncOption") || ""
-    );
-    if (Object.keys(config).length === 0) {
-      toast.error(this.props.t("Cannot get sync config"));
-      return false;
+    let config: any = {};
+    if (defaultSyncOption) {
+      config = await getCloudConfig(defaultSyncOption);
+      if (Object.keys(config).length === 0) {
+        toast.error(this.props.t("Cannot get sync config"));
+        return false;
+      }
     }
-    if (
-      ConfigService.getItem("defaultSyncOption") === "google" &&
-      !config.version
-    ) {
+    if (defaultSyncOption === "google" && !config.version) {
       let targetDrive = "google";
       await TokenService.setToken(targetDrive + "_token", "");
       SyncService.removeSyncUtil(targetDrive);
@@ -405,7 +406,7 @@ class Header extends React.Component<HeaderProps, HeaderState> {
       );
       return false;
     }
-    if (ConfigService.getReaderConfig("isEnableOnlineSync") !== "yes") {
+    if (!isOnlineSyncEnabled) {
       if (ConfigService.getReaderConfig("hideSyncProgress") !== "yes") {
         toast.loading(
           this.props.t("Start syncing") +
@@ -631,7 +632,10 @@ class Header extends React.Component<HeaderProps, HeaderState> {
           <div
             className="setting-icon-container"
             onClick={async () => {
-              if (!ConfigService.getItem("defaultSyncOption")) {
+              if (
+                !ConfigService.getItem("defaultSyncOption") &&
+                ConfigService.getReaderConfig("isEnableOnlineSync") !== "yes"
+              ) {
                 toast(
                   this.props.t(
                     "Please add data source in the setting-Sync and backup first"

@@ -312,8 +312,8 @@ export const syncSettingList = [
   },
   {
     isElectron: false,
-    title: "Enable Online reading data sync",
-    desc: "Enable this option to increase synchronization speed. Your reading progress, notes, highlights, bookmarks, and other reading-related data will be encrypted, stored and synced via our cloud service, your books and covers will still be synced by your added data sources. Turning off this option will remove the above data from our cloud.",
+    title: "Online reading data sync",
+    desc: "Store and sync reading progress, notes, highlights, bookmarks, words, and settings with your configured online service. Books and covers continue to use your selected data source. Turning this option off stops online synchronization and does not delete server data.",
     propName: "isEnableOnlineSync",
   },
   {
