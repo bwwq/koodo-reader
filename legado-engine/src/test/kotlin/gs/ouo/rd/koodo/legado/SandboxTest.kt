@@ -17,7 +17,7 @@ class SandboxTest {
                 context.evaluateString(scope, "Packages.java.lang.Runtime.getRuntime()", "blocked", 1, null)
             }.isFailure)
             assertTrue(runCatching {
-                context.evaluateString(scope, "Packages.java.io.File", "blocked", 1, null)
+                context.evaluateString(scope, "new Packages.java.io.File('/tmp/blocked')", "blocked", 1, null)
             }.isFailure)
             assertTrue(runCatching {
                 context.evaluateString(scope, "Packages.io.legado.app.data.entities.Book", "allowed", 1, null)

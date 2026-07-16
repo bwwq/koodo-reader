@@ -36,16 +36,20 @@ private val allowedScriptClasses = listOf(
 
 fun installSandbox() {
     if (!sandboxInstalled.compareAndSet(false, true)) return
-    ContextFactory.initGlobal(object : ContextFactory() {
-        override fun makeContext(): Context {
-            return super.makeContext().apply {
-                setClassShutter(ClassShutter { name ->
-                    allowedScriptClasses.any { allowed ->
-                        if (allowed.endsWith('.')) name.startsWith(allowed) else name == allowed
-                    }
-                })
-                optimizationLevel = -1
-            }
+    Class.forName("com.script.javascript.RhinoScriptEngine")
+    val shutter = ClassShutter { name ->
+        allowedScriptClasses.any { allowed ->
+            if (allowed.endsWith('.')) name.startsWith(allowed) else name == allowed
+        }
+    }
+    ContextFactory.getGlobal().addListener(object : ContextFactory.Listener {
+        override fun contextCreated(context: Context) {
+            context.setClassShutter(shutter)
+            context.optimizationLevel = -1
+        }
+
+        override fun contextReleased(context: Context) {
+            // Nothing to release; the context owns no host resources.
         }
     })
     ReaderAdapterHelper.setAdapter(IsolatedAdapter(File(dataDir, "runtime")))
