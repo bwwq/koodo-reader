@@ -15,7 +15,7 @@ import ImportDialog from "./component";
 import { withRouter } from "react-router-dom";
 const mapStateToProps = (state: stateType) => {
   return {
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
     isOpenImportDialog: state.backupPage.isOpenImportDialog,
     dataSourceList: state.backupPage.dataSourceList,
     importBookFunc: state.book.importBookFunc,

@@ -1,201 +1,210 @@
 import toast from "react-hot-toast";
-import {
-  ConfigService,
-  KookitConfig,
-  SyncUtil,
-  ThirdpartyRequest,
-  TokenService,
-} from "../../assets/lib/kookit-extra-browser.min";
+import { ConfigService, TokenService } from "../../assets/lib/kookit-extra-browser.min";
 import i18n from "../../i18n";
-import { handleExitApp } from "./common";
-import { getServerRegion } from "../common";
-let thirdpartyRequest: ThirdpartyRequest | undefined;
-export const getThirdpartyRequest = async () => {
-  if (thirdpartyRequest) {
-    return thirdpartyRequest;
-  }
-  thirdpartyRequest = new ThirdpartyRequest(
-    TokenService,
-    ConfigService,
-    getServerRegion()
-  );
-  return thirdpartyRequest;
-};
-export const resetThirdpartyRequest = () => {
-  thirdpartyRequest = undefined;
-};
-export const onSyncCallback = async (service: string, authCode: string) => {
-  toast.loading(i18n.t("Adding"), { id: "adding-sync-id" });
+import {
+  ApiResponse,
+  canUseBoundOnlineSync,
+  getServiceHealth,
+  serviceRequest,
+} from "./service";
 
-  let response = await authThirdToken(
-    service,
-    authCode,
-    getServerRegion() === "china" &&
-      (service === "microsoft" ||
-        service === "microsoft_exp" ||
-        service === "dubox" ||
-        service === "yiyiwu" ||
-        service === "adrive")
-      ? KookitConfig.ThirdpartyConfig.cnCallbackUrl
-      : KookitConfig.ThirdpartyConfig.callbackUrl
-  );
-  let result = response.data;
-  if (!result || !result.refresh_token) {
-    toast.error(i18n.t("Authorization failed"), { id: "adding-sync-id" });
-    return;
+interface OAuthToken {
+  access_token?: string;
+  refresh_token: string;
+  expires_in?: number;
+  [key: string]: any;
+}
+
+export interface SyncItem {
+  type: string;
+  content: string;
+  version: number;
+  updated_at: number | string;
+}
+
+const ok = <T>(data: T): ApiResponse<T> => ({
+  code: 200,
+  msg: "success",
+  data,
+});
+
+const unsupported = <T>(msg: string): ApiResponse<T> => ({
+  code: 410,
+  msg,
+  data: undefined as T,
+});
+
+const checkOnlineCapability = async <T>(
+  capability: "sync.data" | "storage.oauth"
+): Promise<ApiResponse<T>> => {
+  if (capability === "sync.data" && !(await canUseBoundOnlineSync())) {
+    return unsupported<T>("Online sync is not available for this account");
   }
-  let region = "0";
-  if (service === "pcloud" && authCode.indexOf("$") > -1) {
-    // pCloud uses authCode with region info
-    let parts = authCode.split("$");
-    region = parts[1];
+  const health = await getServiceHealth();
+  if (health.code !== 200) {
+    return {
+      code: health.code,
+      msg: health.msg,
+      data: undefined as T,
+    };
   }
-  // FOR PCLOUD, THE REFRESH TOKEN IS THE ACCESS TOKEN, ACCESS TOKEN NEVER EXPIRES
-  let res = await encryptToken(
-    service,
-    service === "yiyiwu" || service === "dubox"
-      ? {
-          refresh_token: result.refresh_token,
-          access_token: result.access_token || "",
-          expires_at:
-            new Date().getTime() +
-            (service === "yiyiwu" ? 30 * 60 * 1000 : 2592000 * 1000),
-          region,
-          auth_date: new Date().getTime(),
-          service: service,
-          version: 1,
-        }
-      : {
-          refresh_token: result.refresh_token,
-          region,
-          auth_date: new Date().getTime(),
-          service: service,
-          version: 1,
-        }
-  );
-  if (res.code === 200) {
-    ConfigService.setListConfig(service, "dataSourceList");
-    toast.success(i18n.t("Binding successful"), { id: "adding-sync-id" });
+  if (!health.data.capabilities.includes(capability)) {
+    return unsupported<T>(`Service capability ${capability} is not available`);
   }
-  if (service === "yiyiwu") {
-    toast(
-      "115 网盘只推荐 115 会员使用，非会员基本上无法使用，并且由于 115 网盘严格的API限制，请务必启用 Koodo Sync，并且 1 小时内不要导入超过5本书以防止被 115 风控。如果出现了风控，请等待至少半小时再使用。",
-      { duration: 10000 }
-    );
-  }
-  return res;
+  return ok(undefined as T);
 };
+
+export const getOnlineSyncItem = async (
+  type: string
+): Promise<ApiResponse<SyncItem>> => {
+  const available = await checkOnlineCapability<SyncItem>("sync.data");
+  if (available.code !== 200) return available;
+  return serviceRequest<SyncItem>(`/v1/sync/${encodeURIComponent(type)}`, {
+    method: "GET",
+  });
+};
+
+export const putOnlineSyncItems = async (
+  items: Record<string, string>,
+  versions: Record<string, number>
+): Promise<ApiResponse<Record<string, SyncItem>>> => {
+  const available = await checkOnlineCapability<Record<string, SyncItem>>(
+    "sync.data"
+  );
+  if (available.code !== 200) {
+    return available;
+  }
+  return serviceRequest<Record<string, SyncItem>>("/v1/sync", {
+    method: "PUT",
+    body: JSON.stringify({ items, versions }),
+  });
+};
+
 export const encryptToken = async (service: string, config: any) => {
-  let syncToken = JSON.stringify(config);
-  let thirdpartyRequest = await getThirdpartyRequest();
-  let response = await thirdpartyRequest.encryptToken({
-    token: syncToken,
-  });
-  if (response.code === 200) {
-    await TokenService.setToken(
-      service + "_token",
-      response.data.encrypted_token
-    );
-    return response;
-  } else if (response.code === 401) {
-    handleExitApp();
-    return response;
-  } else {
-    toast.error(i18n.t("Encryption failed, error code") + ": " + response.msg);
-    if (response.code === 20004) {
-      toast(
-        i18n.t("Please login again to update your membership on this device")
-      );
-    }
-    return response;
-  }
+  const value = `local-v1:${JSON.stringify(config)}`;
+  await TokenService.setToken(service + "_token", value);
+  ConfigService.removeItem(service + "_needsReconnect");
+  return ok({ encrypted_token: value });
 };
+
 export const decryptToken = async (service: string) => {
-  let thirdpartyRequest = await getThirdpartyRequest();
-  let encryptedToken = await TokenService.getToken(service + "_token");
-  if (!encryptedToken || encryptedToken === "{}") {
-    return {};
+  const stored = await TokenService.getToken(service + "_token");
+  if (!stored || stored === "{}") return ok({ token: "{}" });
+  if (stored.startsWith("local-v1:")) {
+    ConfigService.removeItem(service + "_needsReconnect");
+    return ok({ token: stored.slice("local-v1:".length) || "{}" });
   }
-  let response = await thirdpartyRequest.decryptToken({
-    encrypted_token: encryptedToken,
-  });
-  if (response.code === 200) {
-    return response;
-  } else if (response.code === 401) {
-    handleExitApp();
-    return response;
-  } else {
-    toast.error(i18n.t("Decryption failed, error code") + ": " + response.msg);
-    if (response.code === 20004) {
-      toast(
-        i18n.t("Please login again to update your membership on this device")
-      );
-    }
-    return response;
+  try {
+    JSON.parse(stored);
+    const migrated = `local-v1:${stored}`;
+    await TokenService.setToken(service + "_token", migrated);
+    ConfigService.removeItem(service + "_needsReconnect");
+    return ok({ token: stored });
+  } catch {
+    ConfigService.setItem(service + "_needsReconnect", "yes");
+    return {
+      code: 410,
+      msg: i18n.t("This data source needs to be reconnected"),
+      data: { token: "{}", needs_reconnect: true },
+    };
   }
 };
+
 export const getCloudSyncToken = async () => {
-  let thirdpartyRequest = await getThirdpartyRequest();
-  let response = await thirdpartyRequest.getSyncToken();
-  if (response.code === 200) {
-    return response;
-  } else if (response.code === 401) {
-    handleExitApp();
-    return {};
-  } else if (response.code === 20004) {
-    return {};
-  } else {
-    toast.error(i18n.t("Fetch failed, error code") + ": " + response.msg);
-    return {};
-  }
+  const defaultSyncOption = ConfigService.getItem("defaultSyncOption") || "";
+  const defaultSyncToken = defaultSyncOption
+    ? await TokenService.getToken(defaultSyncOption + "_token")
+    : "";
+  return ok({
+    default_sync_option: defaultSyncOption,
+    default_sync_token: defaultSyncToken || "",
+  });
 };
+
+export const authorizeThirdProvider = async (
+  provider: string,
+  redirectUri: string
+) => {
+  const available = await checkOnlineCapability<{
+    authorization_url: string;
+    state: string;
+  }>("storage.oauth");
+  if (available.code !== 200) {
+    return available;
+  }
+  return serviceRequest<{ authorization_url: string; state: string }>(
+    "/v1/storage/oauth/authorize",
+    {
+      method: "POST",
+      body: JSON.stringify({ provider, redirect_uri: redirectUri }),
+    }
+  );
+};
+
 export const authThirdToken = async (
   provider: string,
   code: string,
   redirectUri: string
-) => {
-  if (provider === "microsoft_exp") {
-    provider = "microsoft";
-  }
-  let thirdpartyRequest = await getThirdpartyRequest();
-  let response = await thirdpartyRequest.authThirdToken({
-    provider: provider,
-    redirect_uri: redirectUri,
-    code,
-  });
-  if (response.code === 200) {
-    return response;
-  } else if (response.code === 401) {
-    handleExitApp();
-    return response;
-  } else {
+): Promise<ApiResponse<OAuthToken>> => {
+  const response = await serviceRequest<OAuthToken>(
+    "/v1/storage/oauth/exchange",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        provider: provider === "microsoft_exp" ? "microsoft" : provider,
+        code,
+        redirect_uri: redirectUri,
+      }),
+    }
+  );
+  if (response.code !== 200) {
     toast.error(
       i18n.t("Authorization failed, error code") + ": " + response.msg
     );
-    return response;
   }
+  return response;
 };
+
 export const refreshThirdToken = async (
   provider: string,
   refresh_token: string
-) => {
-  if (provider === "microsoft_exp") {
-    provider = "microsoft";
-  }
-  let thirdpartyRequest = await getThirdpartyRequest();
-  let response = await thirdpartyRequest.refreshThirdToken({
-    provider,
-    refresh_token,
-  });
-  if (response.code === 200) {
-    return response;
-  } else if (response.code === 401) {
-    handleExitApp();
-    return response;
-  } else {
+): Promise<ApiResponse<OAuthToken>> => {
+  const response = await serviceRequest<OAuthToken>(
+    "/v1/storage/oauth/refresh",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        provider: provider === "microsoft_exp" ? "microsoft" : provider,
+        refresh_token,
+      }),
+    }
+  );
+  if (response.code !== 200) {
     toast.error(
       i18n.t("Authorization failed, error code") + ": " + response.msg
     );
+  }
+  return response;
+};
+
+export const onSyncCallback = async (service: string, authCode: string) => {
+  toast.loading(i18n.t("Adding"), { id: "adding-sync-id" });
+  const redirectUri = window.location.origin + "/redirect";
+  const response = await authThirdToken(service, authCode, redirectUri);
+  if (response.code !== 200 || !response.data?.refresh_token) {
+    toast.error(i18n.t("Authorization failed"), { id: "adding-sync-id" });
     return response;
   }
+  const result = await encryptToken(service, {
+    ...response.data,
+    service,
+    version: 2,
+    auth_date: Date.now(),
+    expires_at: response.data.expires_in
+      ? Date.now() + response.data.expires_in * 1000
+      : 0,
+  });
+  ConfigService.setListConfig(service, "dataSourceList");
+  toast.success(i18n.t("Binding successful"), { id: "adding-sync-id" });
+  return result;
 };

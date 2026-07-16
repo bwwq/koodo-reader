@@ -124,74 +124,29 @@ class PopupDict extends React.Component<PopupDictProps, PopupDictState> {
 
   handleDict = async (text: string): Promise<string> => {
     let dictText = "";
-    let isFullAnalysis = true;
     try {
-      if (this.state.dictService === "custom-ai-dict-plugin") {
-        this.setState({ isAddNew: false });
-        let plugin = this.props.plugins.find(
-          (item) => item.key === "custom-ai-dict-plugin"
-        );
-        if (!plugin) return "";
-        let targetLang =
-          this.state.dictTarget ||
-          ConfigService.getReaderConfig("dictTarget") ||
-          getFullTranslationTarget();
-        let systemPrompt =
-          ConfigService.getReaderConfig("aiDictPrompt") ||
-          KookitConfig.DefaultPrompts.aiDict;
-        systemPrompt = systemPrompt.replace("{word}", text);
-        systemPrompt = systemPrompt.replace("{to}", targetLang);
-        let config: any = plugin.config || {};
-        this.aiTextAccumulator = "";
-        this.setState({ aiAnswer: "", isAiWaiting: true });
-        this.startUpdateInterval();
-        await chatStream(
-          config.endpoint,
-          config.providerId,
-          config.apiKey,
-          config.modelId,
-          systemPrompt,
-          [],
-          (result) => {
-            if (result && result.done) {
-              return;
-            }
-            if (result && result.text) {
-              if (!this.aiTextAccumulator) {
-                this.setState({ isAiWaiting: false });
-              }
-              this.aiTextAccumulator += result.text;
-            }
-          }
-        );
-        this.stopUpdateInterval();
-        this.aiTextAccumulator = "";
-        this.setState({ isAiWaiting: false, dictText: " " });
-        return "";
-      } else if (
-        this.state.dictService &&
-        this.state.dictService.startsWith("dict")
+      if (
+        this.state.dictService === "custom-ai-dict-plugin" ||
+        this.state.dictService === "official-ai-dict-plugin"
       ) {
-        this.setState({ isAddNew: false });
+        this.setState({ isAddNew: false, dictText: " " });
+        await this.handleDictionaryStream(text, true);
+        return "";
+      }
+      if (this.state.dictService?.startsWith("dict")) {
+        const plugin = this.props.plugins.find(
+          (item) => item.key === this.state.dictService
+        );
+        const dictId: string = (plugin?.config as any)?.dictId || "";
+        if (!dictId) return "";
+        dictText = await DictUtil.lookupWord(dictId, text);
+      } else if (this.state.dictService) {
         const plugin = this.props.plugins.find(
           (item) => item.key === this.state.dictService
         );
         if (!plugin) return "";
-        const config: any = plugin.config || {};
-        const dictId: string = config.dictId || "";
-        if (!dictId) return "";
-        dictText = await DictUtil.lookupWord(dictId, text);
-      } else if (
-        this.state.dictService &&
-        this.state.dictService !== "official-ai-dict-plugin"
-      ) {
-        let plugin = this.props.plugins.find(
-          (item) => item.key === this.state.dictService
-        );
-        if (!plugin) return "";
-        let dictFunc = plugin.script;
         // eslint-disable-next-line no-eval
-        eval(dictFunc);
+        eval(plugin.script);
         dictText = await window.getDictText(
           text,
           "auto",
@@ -200,58 +155,23 @@ class PopupDict extends React.Component<PopupDictProps, PopupDictState> {
           this.props.t,
           plugin.config
         );
-      } else if (
-        this.props.isAuthed &&
-        ConfigService.getReaderConfig("isDisableAI") !== "yes"
-      ) {
-        this.setState({
-          dictService: "official-ai-dict-plugin",
-          isAddNew: false,
-        });
+      } else {
         dictText = await getDictText(
           text,
           ConfigService.getReaderConfig("dictTarget") || "auto",
-          ConfigService.getReaderConfig("lang") &&
-            ConfigService.getReaderConfig("lang").startsWith("zh")
+          ConfigService.getReaderConfig("lang")?.startsWith("zh")
             ? "chs"
             : "eng"
         );
-        if (dictText) {
-          isFullAnalysis = false;
-        }
       }
-
       if (dictText.startsWith("https://")) {
         openExternalUrl(dictText, true, "dict");
-        let docs = getIframeDoc(this.props.currentBook.format);
-        for (let i = 0; i < docs.length; i++) {
-          let doc = docs[i];
-          if (!doc) continue;
-          doc.getSelection()?.empty();
-        }
-        return "";
-      } else {
-        this.setState(
-          {
-            dictText: dictText,
-          },
-          () => {
-            let moreElement = document.querySelector(".dict-learn-more");
-            if (moreElement) {
-              moreElement.addEventListener("click", () => {
-                openExternalUrl(window.learnMoreUrl || getWebsiteUrl());
-              });
-            }
-          }
+        getIframeDoc(this.props.currentBook.format).forEach((doc) =>
+          doc?.getSelection()?.empty()
         );
+        return "";
       }
-      if (
-        this.props.isAuthed &&
-        ConfigService.getReaderConfig("isDisableAI") !== "yes" &&
-        this.state.dictService === "official-ai-dict-plugin"
-      ) {
-        this.handleDictionaryStream(text, isFullAnalysis);
-      }
+      this.setState({ dictText });
       return dictText;
     } catch (error) {
       toast.error(
@@ -259,10 +179,7 @@ class PopupDict extends React.Component<PopupDictProps, PopupDictState> {
           ": " +
           (error instanceof Error ? error.message : String(error))
       );
-      console.error(error);
-      this.setState({
-        dictText: this.props.t("Error happened"),
-      });
+      this.setState({ dictText: this.props.t("Error happened") });
       return "";
     }
   };
@@ -288,7 +205,7 @@ class PopupDict extends React.Component<PopupDictProps, PopupDictState> {
       );
       this.stopUpdateInterval();
       this.aiTextAccumulator = "";
-      if (res && res.done) {
+      if (res && res.code === 200) {
         this.setState({ isAiWaiting: false });
       }
     } catch (error) {

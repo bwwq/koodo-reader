@@ -11,7 +11,7 @@ import { withTranslation } from "react-i18next";
 const mapStateToProps = (state: stateType) => {
   return {
     isConvertOpen: state.reader.isConvertOpen,
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
     currentBook: state.book.currentBook,
     isSettingLocked: state.reader.isSettingLocked,
   };

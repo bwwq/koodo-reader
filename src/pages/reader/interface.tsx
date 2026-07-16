@@ -13,7 +13,7 @@ export interface ReaderProps {
   isAnnotationOpen: boolean;
   isOpenPopupOptionDialog: boolean;
   isSearch: boolean;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   isSettingOpen: boolean;
   readerMode: string;
   scale: string;
@@ -33,8 +33,8 @@ export interface ReaderProps {
   handleReadingBook: (book: BookModel) => void;
   handleScale: (scale: string) => void;
   renderBookFunc: () => void;
-  handleFetchAuthed: () => void;
-  handleFetchUserInfo: () => Promise<any>;
+  handleFetchServiceConnected: () => void;
+  handleFetchServiceUser: () => Promise<any>;
 }
 
 export interface ReaderState {

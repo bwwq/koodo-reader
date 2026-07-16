@@ -269,7 +269,7 @@ class Viewer extends React.Component<ViewerProps, ViewerState> {
           fullTranslationMode:
             ConfigService.getAllListConfig("fullTranslationBooks").includes(
               this.props.currentBook.key
-            ) && this.props.isAuthed
+            )
               ? ConfigService.getReaderConfig("fullTranslationMode")
               : "no",
           textOrientation: ConfigService.getReaderConfig("textOrientation"),
@@ -306,10 +306,7 @@ class Viewer extends React.Component<ViewerProps, ViewerState> {
                   : getOcrResult,
           },
           ocrEngine: getDefaultOcrEngine(this.props.currentBook),
-          serverRegion:
-            getServerRegion() === "china" && this.props.isAuthed
-              ? "china"
-              : "global",
+          serverRegion: getServerRegion(),
           paraSpacingValue:
             ConfigService.getReaderConfig("paraSpacingValue") || "1.5",
           titleSizeValue:

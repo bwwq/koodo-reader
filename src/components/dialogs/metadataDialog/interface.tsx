@@ -1,6 +1,6 @@
 export interface MetadataDialogProps {
   t: (title: string) => string;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   currentBookName: string;
   currentBookAuthor: string;
   handleSetting: (isSettingOpen: boolean) => void;

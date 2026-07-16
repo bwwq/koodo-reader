@@ -168,16 +168,6 @@ class DropdownList extends React.Component<
             "fullTranslationBooks"
           );
         } else {
-          if (!this.props.isAuthed) {
-            this.setState({
-              fullTranslationModeValue: "no",
-            });
-            toast(this.props.t("Please upgrade to Pro to use this feature"));
-            this.props.handleSetting(true);
-            this.props.handleSettingMode("account");
-            ConfigService.setReaderConfig("fullTranslationMode", "no");
-            return;
-          }
           ConfigService.setListConfig(
             this.props.currentBook.key,
             "fullTranslationBooks"

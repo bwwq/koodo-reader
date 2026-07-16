@@ -10,28 +10,28 @@ export interface SettingInfoProps extends RouteComponentProps<any> {
   handleFetchDefaultSyncOption: () => void;
   handleDefaultSyncOption: (defaultSyncOption: string) => void;
   handleFetchLoginOptionList: () => void;
-  userInfo: any;
+  serviceUser: any;
   handleLoginOptionList: (
     loginOptionList: { email: string; provider: string }[]
   ) => void;
-  handleFetchAuthed: () => void;
+  handleFetchServiceConnected: () => void;
   handleLoadingDialog: (isShow: boolean) => void;
   t: (title: string) => string;
   handleFetchBooks: () => void;
   handleFetchPlugins: () => void;
-  cloudSyncFunc: (userInfo: any) => Promise<void>;
-  handleFetchUserInfo: () => Promise<any>;
+  cloudSyncFunc: (serviceUser: any) => Promise<void>;
+  handleFetchServiceUser: () => Promise<any>;
   plugins: PluginModel[];
   books: BookModel[];
   dataSourceList: string[];
   loginOptionList: { email: string; provider: string }[];
   defaultSyncOption: string;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   settingDrive: string;
 }
 export interface SettingInfoState {
   isKeepLocal: boolean;
-  isEnableKoodoSync: boolean;
+  isEnableOnlineSync: boolean;
   isDisableAutoSync: boolean;
   autoOffline: boolean;
   hideSyncProgress: boolean;

@@ -5,7 +5,7 @@ export interface SettingSwitchProps {
   currentBook: BookModel;
   htmlBook: HtmlBookModel | null;
   plugins: PluginModel[];
-  isAuthed?: boolean;
+  isServiceConnected?: boolean;
   renderBookFunc: () => void;
   handleHideFooter: (isHideFooter: boolean) => void;
   handleHideHeader: (isHideHeader: boolean) => void;

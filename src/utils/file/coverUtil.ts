@@ -8,7 +8,6 @@ import Book from "../../models/Book";
 import {
   CommonTool,
   ConfigService,
-  TokenService,
 } from "../../assets/lib/kookit-extra-browser.min";
 import { getCloudConfig } from "./common";
 import { LocalFileManager } from "./localFile";
@@ -357,10 +356,6 @@ class CoverUtil {
     }
   }
   static async uploadCover(cover: string) {
-    let isAuthed = await TokenService.getToken("is_authed");
-    if (isAuthed !== "yes") {
-      return;
-    }
     if (isElectron) {
       const { ipcRenderer } = window.require("electron");
       let service = ConfigService.getItem("defaultSyncOption");
@@ -460,10 +455,6 @@ class CoverUtil {
     }
   }
   static async deleteCloudCover(key: string) {
-    let isAuthed = await TokenService.getToken("is_authed");
-    if (isAuthed !== "yes") {
-      return;
-    }
     let coverList = await this.getCloudCoverList();
     for (let cover of coverList) {
       if (cover.startsWith(key)) {

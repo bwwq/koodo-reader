@@ -6,8 +6,8 @@ const initState = {
   isSearch: false,
   isShowPopupNote: false,
   isAboutOpen: false,
-  isAuthed: false,
-  userInfo: null,
+  isServiceConnected: false,
+  serviceUser: null,
   userConfig: null,
   isSettingOpen: false,
   viewMode: "card",
@@ -17,7 +17,6 @@ const initState = {
   isDetailDialog: false,
   isLoadMore: false,
   isShowNew: false,
-  isShowSupport: false,
   bookSortCode: { sort: 1, order: 2 },
   noteSortCode: { sort: 1, order: 2 },
   isSelectBook: false,
@@ -52,10 +51,10 @@ export function manager(
         ...state,
         isShowPopupNote: action.payload,
       };
-    case "HANDLE_USER_INFO":
+    case "HANDLE_SERVICE_USER":
       return {
         ...state,
-        userInfo: action.payload,
+        serviceUser: action.payload,
       };
     case "HANDLE_USER_CONFIG":
       return {
@@ -82,10 +81,10 @@ export function manager(
         ...state,
         isSelectBook: action.payload,
       };
-    case "HANDLE_AUTHED":
+    case "HANDLE_SERVICE_CONNECTED":
       return {
         ...state,
-        isAuthed: action.payload,
+        isServiceConnected: action.payload,
       };
     case "HANDLE_SELECTED_BOOKS":
       return {
@@ -133,11 +132,6 @@ export function manager(
       return {
         ...state,
         isShowLoading: action.payload,
-      };
-    case "HANDLE_SHOW_SUPPORT":
-      return {
-        ...state,
-        isShowSupport: action.payload,
       };
     case "HANDLE_LOAD_MORE":
       return {

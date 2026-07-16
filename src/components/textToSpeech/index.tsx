@@ -16,7 +16,7 @@ const mapStateToProps = (state: stateType) => {
     isReading: state.book.isReading,
     plugins: state.manager.plugins,
     readerMode: state.reader.readerMode,
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
     speechStartText: state.reader.speechStartText,
     isSpeechAutoStart: state.reader.isSpeechAutoStart,
   };

@@ -2,7 +2,7 @@ import { connect } from "react-redux";
 import {
   handleNewDialog,
   handleNewWarning,
-  handleFetchAuthed,
+  handleFetchServiceConnected,
   handleLoginOptionList,
   handleFetchDataSourceList,
   handleFetchDefaultSyncOption,
@@ -15,14 +15,14 @@ const mapStateToProps = (state: stateType) => {
   return {
     currentBook: state.book.currentBook,
 
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
     isShowNew: state.manager.isShowNew,
   };
 };
 const actionCreator = {
   handleNewDialog,
   handleNewWarning,
-  handleFetchAuthed,
+  handleFetchServiceConnected,
   handleLoginOptionList,
   handleFetchDataSourceList,
   handleFetchDefaultSyncOption,

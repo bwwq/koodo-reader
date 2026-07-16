@@ -11,6 +11,7 @@ jobs:
 
     # Platforms to build on/for
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-26, ubuntu-22.04, windows-2022, ubuntu-24.04-arm]
 
@@ -40,12 +41,20 @@ jobs:
           sudo gem install --no-document fpm
       - name: Prepare for app notarization (macOS)
         if: startsWith(matrix.os, 'macos')
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          API_KEY_ID: ${{ secrets.API_KEY_ID }}
+          MAC_CERTS: ${{ secrets.MAC_CERTS }}
         # Import Apple API key for app notarization on macOS
+        shell: bash
         run: |
-          mkdir -p ~/private_keys/
-          echo ${{ github.ref }}
-          echo '${{ secrets.API_KEY }}' > ~/private_keys/AuthKey_${{ secrets.API_KEY_ID }}.p8
-          brew install python-setuptools
+          if [[ -z "$MAC_CERTS" ]]; then
+            node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json","utf8")); delete p.build.mac.identity; p.build.mac.notarize=false; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");'
+          elif [[ -n "$API_KEY" && -n "$API_KEY_ID" ]]; then
+            mkdir -p ~/private_keys/
+            printf '%s' "$API_KEY" > ~/private_keys/AuthKey_${API_KEY_ID}.p8
+            brew install python-setuptools
+          fi
       - name: Set environment variable USE_SYSTEM_FPM
         if: startsWith(matrix.os, 'ubuntu-24.04-arm')
         run: echo "USE_SYSTEM_FPM=true" >> $GITHUB_ENV
@@ -55,7 +64,7 @@ jobs:
         if: github.ref == 'refs/heads/dev'
         shell: bash
         run: |
-          if [[ "${{ matrix.os }}" == "windows-22" ]]; then
+          if [[ "${{ matrix.os }}" == "windows-2022" ]]; then
             powershell -Command "(Get-Content package.json) -replace '\"productName\": \"Koodo Reader\"', '\"productName\": \"Koodo Reader DEV\"' | Set-Content package.json"
           else
             sed -i.bak 's/"productName": "Koodo Reader"/"productName": "Koodo Reader DEV"/' package.json
@@ -92,3 +101,20 @@ jobs:
           # macOS notarization API key
           API_KEY_ID: ${{ secrets.API_KEY_ID }}
           API_KEY_ISSUER_ID: ${{ secrets.API_KEY_ISSUER_ID }}
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koodo-reader-${{ matrix.os }}
+          if-no-files-found: warn
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.snap
+            dist/*.yml
+            dist/*.blockmap

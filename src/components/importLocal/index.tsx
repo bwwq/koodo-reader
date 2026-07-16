@@ -20,7 +20,7 @@ const mapStateToProps = (state: stateType) => {
     deletedBooks: state.manager.deletedBooks,
     mode: state.sidebar.mode,
     shelfTitle: state.sidebar.shelfTitle,
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
   };
 };
 const actionCreator = {

@@ -230,7 +230,7 @@ class PopupAssist extends React.Component<PopupAssistProps, PopupAssistState> {
         this.props.plugins.findIndex(
           (item) => item.key === this.state.aiService
         ) === -1) &&
-      !this.props.isAuthed
+      !this.props.isServiceConnected
     ) {
       this.setState({ isAddNew: true });
     }
@@ -238,148 +238,58 @@ class PopupAssist extends React.Component<PopupAssistProps, PopupAssistState> {
   }
   handleDoAnswer = async (text: string) => {
     try {
-      if (
-        this.state.aiService &&
-        this.state.aiService === "custom-ai-assistant-plugin"
-      ) {
-        let plugin = this.props.plugins.find(
-          (item) => item.key === "custom-ai-assistant-plugin"
-        );
-        if (!plugin) {
-          return;
-        }
-        let systemPrompt =
-          ConfigService.getReaderConfig("aiAssistancePrompt") ||
-          KookitConfig.DefaultPrompts.aiAssistance;
-        if (this.state.mode === "ask") {
-          systemPrompt = systemPrompt.replace("{text}", text);
-        } else {
-          systemPrompt = systemPrompt.replace("{text}", "");
-        }
-        let config: any = plugin.config || {};
-        let chatHistory =
-          this.state.mode === "ask"
-            ? this.state.askHistory
-            : this.state.chatHistory;
-        // Build messages: system prompt as first user message, then history, then current question
-        const historyMessages = chatHistory.slice(0, -1); // exclude the latest user message we just added
-        const currentQuestion =
-          chatHistory[chatHistory.length - 1]?.content || this.state.question;
-        if (!currentQuestion) {
-          return;
-        }
-        this.answerTextAccumulator = "";
-        this.startUpdateInterval();
-        await chatStream(
-          config.endpoint,
-          config.providerId,
-          config.apiKey,
-          config.modelId,
-          systemPrompt + "\n\nUser question: " + currentQuestion,
-          historyMessages,
-          (result) => {
-            if (result && result.done) {
-              return;
-            }
-            if (result && result.text) {
-              if (!this.answerTextAccumulator) {
-                this.setState({ isWaiting: false });
-              }
-              this.answerTextAccumulator += result.text;
-            }
-          }
-        );
-        this.stopUpdateInterval(this.answerTextAccumulator);
-        const finalAnswer = this.answerTextAccumulator;
-        this.answerTextAccumulator = "";
-        if (this.state.mode === "ask") {
-          this.setState({
-            askHistory: [
-              ...this.state.askHistory,
-              { role: "assistant", content: finalAnswer },
-            ],
-            answer: "",
-            question: "",
-            isWaiting: false,
-          });
-        } else {
-          this.setState({
-            chatHistory: [
-              ...this.state.chatHistory,
-              { role: "assistant", content: finalAnswer },
-            ],
-            answer: "",
-            question: "",
-            isWaiting: false,
-          });
-        }
-        if (ConfigService.getReaderConfig("isManualScroll") !== "yes") {
-          this.scrollToBottom();
-        }
-      } else if (
-        this.state.aiService &&
-        this.state.aiService !== "official-ai-assistant-plugin"
-      ) {
-      } else if (this.props.isAuthed) {
-        let plugin = this.props.plugins.find(
-          (item) => item.key === "official-ai-assistant-plugin"
-        );
-        if (!plugin) {
-          return;
-        }
-        this.answerTextAccumulator = "";
-        this.startUpdateInterval();
-        let res = await getAnswerStream(
-          text,
-          this.state.question,
-          this.state.mode === "ask"
-            ? this.state.askHistory
-            : this.state.chatHistory,
-          this.state.mode,
-          (result) => {
-            if (result && result.text) {
-              if (!this.answerTextAccumulator) {
-                this.setState({ isWaiting: false });
-              }
-              this.answerTextAccumulator += result.text;
-            }
-          }
-        );
-        this.stopUpdateInterval(this.answerTextAccumulator);
-        const finalAnswer = this.answerTextAccumulator;
-        this.answerTextAccumulator = "";
-        if (res.data && res.done) {
-          if (this.state.mode === "ask") {
-            this.setState({
-              askHistory: [
-                ...this.state.askHistory,
-                {
-                  role: "assistant",
-                  content: finalAnswer,
-                },
-              ],
-              answer: "",
-              question: "",
-              isWaiting: false,
-            });
-          } else {
-            this.setState({
-              chatHistory: [
-                ...this.state.chatHistory,
-                {
-                  role: "assistant",
-                  content: finalAnswer,
-                },
-              ],
-              answer: "",
-              question: "",
-              isWaiting: false,
-            });
+      const chatHistory =
+        this.state.mode === "ask"
+          ? this.state.askHistory
+          : this.state.chatHistory;
+      const currentQuestion =
+        chatHistory[chatHistory.length - 1]?.content || this.state.question;
+      if (!currentQuestion) return;
+
+      this.answerTextAccumulator = "";
+      this.setState({ isWaiting: true, isAddNew: false });
+      this.startUpdateInterval();
+      const response = await getAnswerStream(
+        text,
+        currentQuestion,
+        chatHistory.slice(0, -1),
+        this.state.mode,
+        (result) => {
+          if (result?.text) {
+            this.setState({ isWaiting: false });
+            this.answerTextAccumulator += result.text;
           }
         }
-        if (ConfigService.getReaderConfig("isManualScroll") !== "yes") {
-          this.scrollToBottom();
-        }
+      );
+      this.stopUpdateInterval(this.answerTextAccumulator);
+      const finalAnswer = this.answerTextAccumulator;
+      this.answerTextAccumulator = "";
+      if (response.code !== 200 || !finalAnswer) {
+        this.setState({ isWaiting: false });
+        if (response.msg) toast.error(response.msg);
+        return;
+      }
+      const nextHistory = [
+        ...chatHistory,
+        { role: "assistant", content: finalAnswer } as AiChatMessage,
+      ];
+      if (this.state.mode === "ask") {
+        this.setState({
+          askHistory: nextHistory,
+          answer: "",
+          question: "",
+          isWaiting: false,
+        });
+      } else {
+        this.setState({
+          chatHistory: nextHistory,
+          answer: "",
+          question: "",
+          isWaiting: false,
+        });
+      }
+      if (ConfigService.getReaderConfig("isManualScroll") !== "yes") {
+        this.scrollToBottom();
       }
     } catch (error) {
       toast.error(
@@ -387,13 +297,9 @@ class PopupAssist extends React.Component<PopupAssistProps, PopupAssistState> {
           ": " +
           (error instanceof Error ? error.message : String(error))
       );
-      console.error(error);
-      this.setState({
-        answer: this.props.t("Error happened"),
-      });
+      this.setState({ answer: this.props.t("Error happened"), isWaiting: false });
     }
-  };
-  handleChangeAiService = (aiService: string) => {
+  };  handleChangeAiService = (aiService: string) => {
     let plugin = this.props.plugins.find((item) => item.key === aiService);
     if (!plugin) {
       return;

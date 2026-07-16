@@ -7,7 +7,7 @@ export interface TextToSpeechProps {
   plugins: PluginModel[];
   htmlBook: HtmlBook;
   isReading: boolean;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   readerMode: string;
   speechStartText: string;
   isSpeechAutoStart: boolean;

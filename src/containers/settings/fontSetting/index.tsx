@@ -7,7 +7,7 @@ import { stateType } from "../../../store";
 const mapStateToProps = (state: stateType) => {
   return {
     renderBookFunc: state.book.renderBookFunc,
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
   };
 };
 const actionCreator = {};

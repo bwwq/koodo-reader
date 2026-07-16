@@ -1,39 +1,25 @@
-import PluginModel from "../../../models/Plugin";
 import { RouteComponentProps } from "react-router-dom";
-export interface SettingInfoProps extends RouteComponentProps<any> {
-  handleSetting: (isSettingOpen: boolean) => void;
-  handleSettingMode: (settingMode: string) => void;
-  handleSettingDrive: (settingDrive: string) => void;
-  handleTokenDialog: (isOpenTokenDialog: boolean) => void;
-  handleFetchDataSourceList: () => void;
-  handleFetchDefaultSyncOption: () => void;
-  handleFetchLoginOptionList: () => void;
-  handleLoginOptionList: (
-    loginOptionList: { email: string; provider: string }[]
-  ) => void;
-  handleFetchAuthed: () => void;
-  handleLoadingDialog: (isShow: boolean) => void;
-  t: (title: string) => string;
-  handleFetchBooks: () => void;
-  handleFetchPlugins: () => void;
-  handleFetchUserInfo: () => Promise<void>;
-  cloudSyncFunc: () => Promise<void>;
-  isShowSupport: boolean;
-  plugins: PluginModel[];
+import { ServiceUser } from "../../../utils/request/service";
 
-  userInfo: any;
-  loginOptionList: { email: string; provider: string }[];
-  defaultSyncOption: string;
-  isAuthed: boolean;
-  settingDrive: string;
+export interface SettingInfoProps extends RouteComponentProps<any> {
+  t: (title: string) => string;
+  serviceUser: ServiceUser | null;
+  isServiceConnected: boolean;
+  handleFetchServiceConnected: () => Promise<void>;
+  handleFetchServiceUser: () => Promise<ServiceUser | null>;
+  handleFetchPlugins: () => void;
 }
+
 export interface SettingInfoState {
-  isAddNew: boolean;
-  isRedeemCode: boolean;
-  redeemCode: string;
-  loginConfig: any;
-  settingLogin: string;
-  serverRegion: string;
-  isSendingCode: boolean;
-  countdown: number;
+  serviceBaseUrl: string;
+  username: string;
+  password: string;
+  confirmPassword: string;
+  inviteCode: string;
+  registrationMode: "admin" | "invite";
+  isRegistering: boolean;
+  isLoading: boolean;
+  serviceVersion: string;
+  capabilities: string[];
+  healthMessage: string;
 }

@@ -4,7 +4,7 @@ export interface PopupDictProps {
   originalText: string;
   originalSentence: string;
   plugins: PluginModel[];
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   currentBook: BookModel;
   handleOpenMenu: (isOpenMenu: boolean) => void;
   handleMenuMode: (menu: string) => void;

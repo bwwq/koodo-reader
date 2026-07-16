@@ -13,8 +13,8 @@ import {
   handleSpeechDialog,
   handleAnnotationDialog,
   handleScale,
-  handleFetchAuthed,
-  handleFetchUserInfo,
+  handleFetchServiceConnected,
+  handleFetchServiceUser,
   handleBackgroundColor,
 } from "../../store/actions";
 import { connect } from "react-redux";
@@ -35,7 +35,7 @@ const mapStateToProps = (state: stateType) => {
     isAnnotationOpen: state.reader.isAnnotationOpen,
     isOpenPopupOptionDialog: state.backupPage.isOpenPopupOptionDialog,
     isSettingLocked: state.reader.isSettingLocked,
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
     isSearch: state.manager.isSearch,
     isSettingOpen: state.manager.isSettingOpen,
     scale: state.reader.scale,
@@ -55,10 +55,10 @@ const actionCreator = {
   handleConvertDialog,
   handlePdfCropDialog,
   handleScale,
-  handleFetchAuthed,
+  handleFetchServiceConnected,
   handleSpeechDialog,
   handleAnnotationDialog,
-  handleFetchUserInfo,
+  handleFetchServiceUser,
   handleBackgroundColor,
 };
 export default connect(

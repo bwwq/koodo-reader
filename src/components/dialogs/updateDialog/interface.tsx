@@ -3,11 +3,11 @@ export interface UpdateInfoProps {
   currentBook: BookModel;
 
   isShowNew: boolean;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   t: (title: string) => string;
   handleNewDialog: (isShowNew: boolean) => void;
   handleNewWarning: (isNewWarning: boolean) => void;
-  handleFetchAuthed: () => void;
+  handleFetchServiceConnected: () => void;
   handleFetchDataSourceList: () => void;
   handleFetchDefaultSyncOption: () => void;
   handleLoginOptionList: (

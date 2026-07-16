@@ -11,7 +11,7 @@ import LocalFileDialog from "./component";
 import { withRouter } from "react-router-dom";
 const mapStateToProps = (state: stateType) => {
   return {
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
   };
 };
 const actionCreator = {

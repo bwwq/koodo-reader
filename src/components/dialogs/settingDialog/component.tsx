@@ -79,7 +79,7 @@ class SettingDialog extends React.Component<
       case "sync":
         return "Sync and backup";
       case "account":
-        return "Account";
+        return "Online service";
       case "about":
         return "About";
       case "ai":
@@ -140,7 +140,12 @@ class SettingDialog extends React.Component<
               "More settings",
               "13px"
             )}
-            {this.renderSidebarItem("account", "icon-user", "Account", "18px")}
+            {this.renderSidebarItem(
+              "account",
+              "icon-user",
+              "Online service",
+              "18px"
+            )}
             {this.renderSidebarItem("about", "icon-detail", "About", "18px")}
           </div>
 

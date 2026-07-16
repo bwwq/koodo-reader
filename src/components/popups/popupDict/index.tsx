@@ -14,7 +14,7 @@ const mapStateToProps = (state: stateType) => {
     originalText: state.reader.originalText,
     originalSentence: state.reader.originalSentence,
     plugins: state.manager.plugins,
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
     currentBook: state.book.currentBook,
   };
 };

@@ -120,95 +120,28 @@ class PopupTrans extends React.Component<PopupTransProps, PopupTransState> {
           );
           console.error(err);
         });
-    } else if (this.state.transService === "custom-ai-trans-plugin") {
-      this.setState({
-        transService: "custom-ai-trans-plugin",
-        isAddNew: false,
-      });
-      let plugin = this.props.plugins.find(
-        (item) => item.key === "custom-ai-trans-plugin"
+    } else {
+      this.setState({ isAddNew: false });
+      const plugin = this.props.plugins.find(
+        (item) => item.key === this.state.transService
       );
-      if (!plugin) {
-        return;
-      }
-      let targetLang =
+      const target =
         ConfigService.getReaderConfig("transTarget") ||
-        getDefaultTransTarget(plugin.langList);
-      if (targetLang === "Traditional Chinese") {
-        targetLang = "繁体中文";
-      }
-      let systemPrompt =
-        ConfigService.getReaderConfig("aiTranslatePrompt") ||
-        KookitConfig.DefaultPrompts.aiTranslate;
-      systemPrompt = systemPrompt.replace(
-        "{from}",
-        ConfigService.getReaderConfig("transSource") || "Automatic"
-      );
-      systemPrompt = systemPrompt.replace("{to}", targetLang);
-      systemPrompt = systemPrompt.replace("{text}", text);
-      let config: any = plugin.config || {};
-      this.textAccumulator = "";
-      this.startUpdateInterval();
-      await chatStream(
-        config.endpoint,
-        config.providerId,
-        config.apiKey,
-        config.modelId,
-        systemPrompt,
-        [],
-        (result) => {
-          if (result && result.done) {
-            return;
-          }
-          if (result && result.text) {
-            this.textAccumulator += result.text;
-          }
-        }
-      );
-      this.stopUpdateInterval();
-      this.textAccumulator = "";
-      this.setState({ isFinishOutput: true });
-    } else if (
-      this.props.isAuthed &&
-      ConfigService.getReaderConfig("isDisableAI") !== "yes"
-    ) {
-      this.setState({
-        transService: "official-ai-trans-plugin",
-        isAddNew: false,
-      });
-      let plugin = this.props.plugins.find(
-        (item) => item.key === "official-ai-trans-plugin"
-      );
-      if (!plugin) {
-        return;
-      }
-      let targetLang =
-        ConfigService.getReaderConfig("transTarget") ||
-        getDefaultTransTarget(plugin.langList);
-      if (targetLang === "Traditional Chinese") {
-        targetLang = "繁体中文";
-      }
+        getDefaultTransTarget(plugin?.langList || []);
       this.textAccumulator = "";
       this.startUpdateInterval();
       await getTransStream(
         text,
         ConfigService.getReaderConfig("transSource") || "Automatic",
-        ConfigService.getReaderConfig("transTarget") ||
-          getDefaultTransTarget(plugin.langList),
+        target,
         (result) => {
-          if (result && result.done) {
-            return;
-          }
-          if (result && result.text) {
-            this.textAccumulator += result.text;
-          }
+          if (result && result.text) this.textAccumulator += result.text;
         }
       );
       this.stopUpdateInterval();
       this.textAccumulator = "";
       this.setState({ isFinishOutput: true });
-    }
-  };
+    }  };
   handleChangeService(target: string) {
     this.setState({ transService: target }, () => {
       ConfigService.setReaderConfig("transService", target);

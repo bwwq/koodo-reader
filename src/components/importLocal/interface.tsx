@@ -5,7 +5,7 @@ export interface ImportLocalProps extends RouteComponentProps<any> {
   deletedBooks: BookModel[];
 
   isCollapsed: boolean;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   mode: string;
   shelfTitle: string;
   cloudSyncFunc: () => Promise<void>;

@@ -178,14 +178,6 @@ class EditDialog extends React.Component<EditDialogProps, EditDialogState> {
               opacity: 0.8,
             }}
             onClick={() => {
-              if (!this.props.isAuthed) {
-                toast(
-                  this.props.t("Please upgrade to Pro to use this feature")
-                );
-                this.props.handleSetting(true);
-                this.props.handleSettingMode("account");
-                return;
-              }
               this.setState({ isMetadataDialogOpen: true });
             }}
           >

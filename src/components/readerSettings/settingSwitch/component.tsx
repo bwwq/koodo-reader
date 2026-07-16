@@ -240,15 +240,6 @@ class SettingSwitch extends React.Component<
             onClick={async () => {
               const next = !this.state.isWordDefinition;
               if (next) {
-                if (!this.props.isAuthed) {
-                  toast(
-                    this.props.t("Please upgrade to Pro to use this feature")
-                  );
-                  this.props.handleSetting(true);
-                  this.props.handleSettingMode("account");
-                  ConfigService.setReaderConfig("fullTranslationMode", "no");
-                  return;
-                }
                 let lang = "";
                 if (this.props.htmlBook?.rendition) {
                   try {

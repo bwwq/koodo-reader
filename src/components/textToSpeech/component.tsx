@@ -19,7 +19,6 @@ import { isElectron } from "react-device-detect";
 import toast from "react-hot-toast";
 import TTSUtil from "../../utils/reader/ttsUtil";
 import "./textToSpeech.css";
-import { fetchUserInfo } from "../../utils/request/user";
 import { getSplitSentence } from "../../utils/request/reader";
 import { Howl } from "howler";
 declare var window: any;
@@ -220,12 +219,6 @@ class TextToSpeech extends React.Component<
   };
   handleMultiRoleToggle = (enabled: boolean) => {
     if (enabled) {
-      if (!this.props.isAuthed) {
-        toast(this.props.t("Please upgrade to Pro to use this feature"));
-        this.props.handleSetting(true);
-        this.props.handleSettingMode("account");
-        return;
-      }
       ConfigService.setListConfig(
         this.props.currentBook.key,
         "multiRoleVoiceBooks"
@@ -293,14 +286,6 @@ class TextToSpeech extends React.Component<
       };
       window.speechSynthesis && window.speechSynthesis.speak(msg);
       return;
-    }
-
-    if (engine === "official-ai-voice-plugin") {
-      if (!this.props.isAuthed) {
-        toast(this.props.t("Please upgrade to Pro to use this feature"));
-        return;
-      }
-      await fetchUserInfo();
     }
 
     const plugin = this.props.plugins.find((item) => item.key === engine);
@@ -379,20 +364,11 @@ class TextToSpeech extends React.Component<
   };
   handleStartAudio = async () => {
     if (
-      this.props.isAuthed &&
       ConfigService.getReaderConfig("voiceEngine") !== "system"
     ) {
       toast.loading(this.props.t("Loading audio, please wait..."), {
         id: "tts-load",
       });
-      await fetchUserInfo();
-    }
-    if (
-      ConfigService.getReaderConfig("voiceEngine") ===
-        "official-ai-voice-plugin" &&
-      !this.props.isAuthed
-    ) {
-      ConfigService.setReaderConfig("voiceEngine", "system");
     }
     this.handleStartSpeech();
   };
@@ -480,12 +456,6 @@ class TextToSpeech extends React.Component<
 
     const currentIndex = this.state.currentIndex;
 
-    // 鉴权检查（AI 语音）
-    if (newVoiceEngine === "official-ai-voice-plugin" && !this.props.isAuthed) {
-      toast(this.props.t("Please upgrade to Pro to use this feature"));
-      return;
-    }
-
     // 停止系统语音
     window.speechSynthesis && window.speechSynthesis.cancel();
 
@@ -505,11 +475,10 @@ class TextToSpeech extends React.Component<
     TTSUtil.setAudioPaths();
 
     // AI 语音需要刷新用户信息
-    if (this.props.isAuthed && newVoiceEngine !== "system") {
+    if (newVoiceEngine !== "system") {
       toast.loading(this.props.t("Loading audio, please wait..."), {
         id: "tts-load",
       });
-      await fetchUserInfo();
     }
 
     // 非多角色模式下，将 nodeList 所有节点更新为新语音
@@ -579,7 +548,7 @@ class TextToSpeech extends React.Component<
       nodeTextList = nodeTextList.slice(speechStartIndex);
     }
     this.clearSpeechStartState();
-    if (!this.state.multiRoleEnabled || !this.props.isAuthed) {
+    if (!this.state.multiRoleEnabled) {
       nodeList = nodeTextList.map((text: string) => {
         return {
           text,

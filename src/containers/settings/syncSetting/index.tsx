@@ -12,9 +12,9 @@ import {
   handleSettingMode,
   handleSettingDrive,
   handleLoadingDialog,
-  handleFetchAuthed,
+  handleFetchServiceConnected,
   handleLoginOptionList,
-  handleFetchUserInfo,
+  handleFetchServiceUser,
   handleDefaultSyncOption,
 } from "../../../store/actions";
 import { stateType } from "../../../store";
@@ -24,9 +24,9 @@ const mapStateToProps = (state: stateType) => {
   return {
     books: state.manager.books,
     plugins: state.manager.plugins,
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
     settingDrive: state.manager.settingDrive,
-    userInfo: state.manager.userInfo,
+    serviceUser: state.manager.serviceUser,
     dataSourceList: state.backupPage.dataSourceList,
     defaultSyncOption: state.backupPage.defaultSyncOption,
     loginOptionList: state.backupPage.loginOptionList,
@@ -44,9 +44,9 @@ const actionCreator = {
   handleSettingDrive,
   handleFetchLoginOptionList,
   handleLoadingDialog,
-  handleFetchAuthed,
+  handleFetchServiceConnected,
   handleLoginOptionList,
-  handleFetchUserInfo,
+  handleFetchServiceUser,
   handleDefaultSyncOption,
 };
 export default connect(

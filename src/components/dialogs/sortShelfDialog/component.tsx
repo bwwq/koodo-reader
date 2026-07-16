@@ -7,6 +7,8 @@ import { ReactSortable } from "react-sortablejs";
 import { ConfigService } from "../../../assets/lib/kookit-extra-browser.min";
 import toast from "react-hot-toast";
 import DeletePopup from "../deletePopup";
+
+const UntypedReactSortable = ReactSortable as React.ComponentType<any>;
 class SortShelfDialog extends React.Component<
   SortShelfDialogProps,
   SortShelfDialogState
@@ -121,7 +123,7 @@ class SortShelfDialog extends React.Component<
         </div>
         <div className="import-dialog-option">
           {
-            <ReactSortable
+            <UntypedReactSortable
               list={this.state.sortedShelfList}
               setList={(newState) =>
                 this.setState({ sortedShelfList: newState })
@@ -215,7 +217,7 @@ class SortShelfDialog extends React.Component<
                   </div>
                 );
               })}
-            </ReactSortable>
+            </UntypedReactSortable>
           }
         </div>
         <div className="import-dialog-back-button">

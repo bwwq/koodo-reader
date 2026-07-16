@@ -6,6 +6,7 @@ import { handleContextMenu, vexTextareaAsync } from "../../../utils/common";
 import {
   ConfigService,
   KookitConfig,
+  TokenService,
 } from "../../../assets/lib/kookit-extra-browser.min";
 
 class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
@@ -18,9 +19,11 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
       selectedProvider: "",
       selectedModel: "",
       endpoint: "",
+      modelsEndpoint: "",
       modelName: "",
       modelId: "",
       apiKey: "",
+      capabilities: ["chat"],
       isTesting: false,
       testResult: "",
       fetchedModels: [],
@@ -29,6 +32,8 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
       aiDictModel: ConfigService.getReaderConfig("aiDictModel") || "",
       aiAssistanceModel:
         ConfigService.getReaderConfig("aiAssistanceModel") || "",
+      aiVisionModel: ConfigService.getReaderConfig("aiVisionModel") || "",
+      aiTtsModel: ConfigService.getReaderConfig("aiTtsModel") || "",
       aiTranslatePrompt:
         ConfigService.getReaderConfig("aiTranslatePrompt") || "",
       aiDictPrompt: ConfigService.getReaderConfig("aiDictPrompt") || "",
@@ -73,9 +78,11 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
       selectedProvider: "",
       selectedModel: "",
       endpoint: "",
+      modelsEndpoint: "",
       modelName: "",
       modelId: "",
       apiKey: "",
+      capabilities: ["chat"],
       isTesting: false,
       testResult: "",
       fetchedModels: [],
@@ -90,6 +97,7 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
       selectedProvider: providerId,
       selectedModel: "",
       endpoint: provider ? provider.defaultEndpoint : "",
+      modelsEndpoint: provider?.modelsEndpoint || "",
       modelName: "",
       modelId: "",
       fetchedModels: [],
@@ -112,24 +120,12 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
   };
 
   handleFetchModels = async () => {
-    const provider = KookitConfig.AiProviderList.find(
-      (p) => p.id === this.state.selectedProvider
-    );
-    if (!provider || !provider.modelsEndpoint) {
+    if (!this.state.modelsEndpoint) {
       toast.error(
         this.props.t(
           "This provider does not support fetching model list, please fill in manually"
         )
       );
-      return;
-    }
-    if (
-      !this.state.apiKey &&
-      this.state.selectedProvider !== "ollama" &&
-      this.state.selectedProvider !== "lmstudio" &&
-      this.state.selectedProvider !== "vllm"
-    ) {
-      toast.error(this.props.t("Please enter API Key first"));
       return;
     }
     this.setState({ isFetchingModels: true });
@@ -138,7 +134,7 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
       if (this.state.apiKey) {
         headers["Authorization"] = `Bearer ${this.state.apiKey}`;
       }
-      const response = await fetch(provider.modelsEndpoint, { headers });
+      const response = await fetch(this.state.modelsEndpoint, { headers });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -177,7 +173,7 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
 
   handleTest = async () => {
     const { endpoint, modelId, apiKey } = this.state;
-    if (!endpoint || !modelId || !apiKey) {
+    if (!endpoint || !modelId) {
       toast.error(this.props.t("Please fill in all required fields"));
       return;
     }
@@ -190,7 +186,7 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         },
         body: JSON.stringify({
           model: modelId,
@@ -223,15 +219,34 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
   handleSave = async () => {
     const {
       endpoint,
+      modelsEndpoint,
       modelName,
       modelId,
       apiKey,
       selectedProvider,
+      capabilities,
       isEditing,
       editingKey,
     } = this.state;
-    if (!endpoint || !modelName || !modelId || !apiKey) {
+    if (!endpoint || !modelName || !modelId) {
       toast.error(this.props.t("Please fill in all required fields"));
+      return;
+    }
+    if (capabilities.length === 0) {
+      toast.error(this.props.t("Select at least one model capability"));
+      return;
+    }
+    try {
+      [endpoint, modelsEndpoint]
+        .filter(Boolean)
+        .forEach((value) => {
+          const url = new URL(value);
+          if (url.protocol !== "http:" && url.protocol !== "https:") {
+            throw new Error();
+          }
+        });
+    } catch {
+      toast.error(this.props.t("Model addresses must use HTTP or HTTPS"));
       return;
     }
     const provider = KookitConfig.AiProviderList.find(
@@ -239,11 +254,12 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
     );
     const config: AIModelConfig = {
       endpoint,
+      modelsEndpoint,
       modelName,
       modelId,
-      apiKey,
       providerId: selectedProvider || "custom",
       providerName: provider ? provider.name : "Custom",
+      capabilities,
     };
     const key = isEditing ? editingKey : Date.now().toString();
     const modelEntry = {
@@ -253,6 +269,7 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
     };
 
     try {
+      await TokenService.setToken(`ai_model_key_${key}`, apiKey);
       ConfigService.setObjectConfig(key, modelEntry, "aiModelConfig");
       toast.success(
         this.props.t(isEditing ? "Update successful" : "Addition successful")
@@ -264,9 +281,10 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
     }
   };
 
-  handleDelete = (key: string) => {
+  handleDelete = async (key: string) => {
     try {
       ConfigService.deleteObjectConfig(key, "aiModelConfig");
+      await TokenService.deleteToken(`ai_model_key_${key}`);
       // 如果被删除的模型正被某个功能使用，则清空对应配置
       if (this.state.aiTranslateModel === key) {
         this.setState({ aiTranslateModel: "" });
@@ -280,6 +298,14 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
         this.setState({ aiAssistanceModel: "" });
         ConfigService.setReaderConfig("aiAssistanceModel", "");
       }
+      if (this.state.aiVisionModel === key) {
+        this.setState({ aiVisionModel: "" });
+        ConfigService.setReaderConfig("aiVisionModel", "");
+      }
+      if (this.state.aiTtsModel === key) {
+        this.setState({ aiTtsModel: "" });
+        ConfigService.setReaderConfig("aiTtsModel", "");
+      }
       toast.success(this.props.t("Deletion successful"));
     } catch (e: any) {
       toast.error(this.props.t("Deletion failed") + ": " + e.message);
@@ -287,7 +313,7 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
     this.props.handleFetchPlugins();
   };
 
-  handleEdit = (plugin: any) => {
+  handleEdit = async (plugin: any) => {
     const entry = ConfigService.getObjectConfig(
       plugin.key,
       "aiModelConfig",
@@ -307,9 +333,14 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
       selectedProvider: config.providerId || "custom",
       selectedModel: config.modelId || "",
       endpoint: config.endpoint || "",
+      modelsEndpoint: config.modelsEndpoint || "",
       modelName: config.modelName || plugin.displayName || "",
       modelId: config.modelId || "",
-      apiKey: config.apiKey || "",
+      apiKey:
+        (await TokenService.getToken(`ai_model_key_${plugin.key}`)) ||
+        (config as any).apiKey ||
+        "",
+      capabilities: config.capabilities || ["chat"],
       testResult: "",
       fetchedModels: [],
     });
@@ -339,7 +370,7 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
     const provider = KookitConfig.AiProviderList.find(
       (p) => p.id === this.state.selectedProvider
     );
-    const hasModelsEndpoint = provider && provider.modelsEndpoint;
+    const hasModelsEndpoint = Boolean(this.state.modelsEndpoint);
     const hasFetchedModels = this.state.fetchedModels.length > 0;
 
     return (
@@ -376,6 +407,7 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
         {/* Step 2: API Key (shown after provider is selected, before fetching models) */}
         {(this.state.selectedProvider || isCustom) &&
           this.state.selectedProvider !== "" && (
+            <>
             <div className="ai-setting-form-row">
               <label className="ai-setting-label">API Key</label>
               <input
@@ -392,10 +424,47 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
                 }
               />
             </div>
+            <div className="ai-setting-form-row">
+              <label className="ai-setting-label">
+                <Trans>Model list address</Trans>
+              </label>
+              <input
+                type="url"
+                className="token-dialog-username-box"
+                placeholder="https://api.example.com/v1/models"
+                value={this.state.modelsEndpoint}
+                onChange={(e) =>
+                  this.setState({ modelsEndpoint: e.target.value.trim() })
+                }
+              />
+            </div>
+            <div className="ai-setting-form-row">
+              <label className="ai-setting-label">
+                <Trans>Capabilities</Trans>
+              </label>
+              {(["chat", "vision", "tts"] as const).map((capability) => (
+                <label key={capability} style={{ marginRight: 14 }}>
+                  <input
+                    type="checkbox"
+                    checked={this.state.capabilities.includes(capability)}
+                    onChange={(event) => {
+                      const capabilities = event.target.checked
+                        ? [...this.state.capabilities, capability]
+                        : this.state.capabilities.filter(
+                            (item) => item !== capability
+                          );
+                      this.setState({ capabilities });
+                    }}
+                  />{" "}
+                  {capability}
+                </label>
+              ))}
+            </div>
+            </>
           )}
 
         {/* Step 3: Fetch models button (for non-custom providers with modelsEndpoint) */}
-        {!isCustom && hasModelsEndpoint && (
+        {hasModelsEndpoint && (
           <div className="ai-setting-form-row">
             <span
               className="change-location-button"
@@ -439,7 +508,7 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
         )}
 
         {/* Step 5: Endpoint, Model name, Model ID (always shown for custom, shown after selection for others) */}
-        {(isCustom || this.state.selectedModel || this.state.isEditing) && (
+        {(this.state.selectedProvider || isCustom) && (
           <>
             {/* Endpoint */}
             <div className="ai-setting-form-row">
@@ -732,6 +801,61 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
           </select>
         </div>
 
+        <div className="setting-dialog-new-title">
+          <span><Trans>OCR vision model</Trans></span>
+          <select
+            className="lang-setting-dropdown"
+            value={this.state.aiVisionModel}
+            onChange={(e) => {
+              const val = e.target.value;
+              this.setState({ aiVisionModel: val });
+              ConfigService.setReaderConfig("aiVisionModel", val);
+              toast.success(this.props.t("Change successful"));
+            }}
+          >
+            <option value="" className="lang-setting-option">
+              {this.props.t("Please select")}
+            </option>
+            {aiModels
+              .filter((item) =>
+                (this.parseConfig(item)?.capabilities || []).includes("vision")
+              )
+              .map((item) => (
+                <option key={item.key} value={item.key} className="lang-setting-option">
+                  {item.displayName}
+                </option>
+              ))}
+          </select>
+        </div>
+
+        <div className="setting-dialog-new-title">
+          <span><Trans>Online TTS model</Trans></span>
+          <select
+            className="lang-setting-dropdown"
+            value={this.state.aiTtsModel}
+            onChange={(e) => {
+              const val = e.target.value;
+              this.setState({ aiTtsModel: val });
+              ConfigService.setReaderConfig("aiTtsModel", val);
+              toast.success(this.props.t("Change successful"));
+              this.props.handleFetchPlugins();
+            }}
+          >
+            <option value="" className="lang-setting-option">
+              {this.props.t("Please select")}
+            </option>
+            {aiModels
+              .filter((item) =>
+                (this.parseConfig(item)?.capabilities || []).includes("tts")
+              )
+              .map((item) => (
+                <option key={item.key} value={item.key} className="lang-setting-option">
+                  {item.displayName}
+                </option>
+              ))}
+          </select>
+        </div>
+
         <div className="setting-dialog-new-plugin">
           <span
             style={{ fontWeight: "bold" }}
@@ -745,9 +869,11 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
                   selectedProvider: "",
                   selectedModel: "",
                   endpoint: "",
+                  modelsEndpoint: "",
                   modelName: "",
                   modelId: "",
                   apiKey: "",
+                  capabilities: ["chat"],
                   testResult: "",
                   fetchedModels: [],
                 },

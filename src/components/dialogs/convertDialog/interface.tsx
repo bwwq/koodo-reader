@@ -7,7 +7,7 @@ export interface ConvertDialogProps {
   handleSetting: (isSettingOpen: boolean) => void;
   handleSettingMode: (mode: string) => void;
   handleConvertDialog: (isAboutOpen: boolean) => void;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   t: (title: string) => string;
   isSettingLocked: boolean;
 }

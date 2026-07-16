@@ -18,7 +18,7 @@ const mapStateToProps = (state: stateType) => {
   return {
     isOpenDeleteDialog: state.book.isOpenDeleteDialog,
     currentBook: state.book.currentBook,
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
   };
 };
 const actionCreator = {

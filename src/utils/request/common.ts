@@ -8,9 +8,7 @@ import {
   TokenService,
 } from "../../assets/lib/kookit-extra-browser.min";
 import { getServerRegion, reloadManager } from "../common";
-import { resetReaderRequest } from "./reader";
-import { resetUserRequest } from "./user";
-import { resetThirdpartyRequest } from "./thirdparty";
+import { clearServiceSession } from "./service";
 import { isElectron } from "react-device-detect";
 const PUBLIC_URL = "https://api.koodoreader.com";
 const CN_PUBLIC_URL = "https://api.koodoreader.cn";
@@ -60,19 +58,7 @@ export const handleExitApp = async () => {
   reloadManager();
 };
 export const handleClearToken = async () => {
-  await TokenService.deleteToken("is_authed");
-  await TokenService.deleteToken("access_token");
-  await TokenService.deleteToken("refresh_token");
-  let dataSourceList = ConfigService.getAllListConfig("dataSourceList") || [];
-  for (let i = 0; i < dataSourceList.length; i++) {
-    let targetDrive = dataSourceList[i];
-    await TokenService.setToken(targetDrive + "_token", "");
-  }
-  ConfigService.removeItem("defaultSyncOption");
-  ConfigService.removeItem("dataSourceList");
-  resetReaderRequest();
-  resetUserRequest();
-  resetThirdpartyRequest();
+  await clearServiceSession();
 };
 
 export const chatStream = async (

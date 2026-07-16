@@ -8,7 +8,7 @@ export interface PageWidgetProps {
   currentChapterIndex: number;
   isNavLocked: boolean;
   isSettingLocked: boolean;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   htmlBook: HtmlBookModel;
   isShowBookmark: boolean;
   isHideFooter: boolean;

@@ -13,6 +13,8 @@ import {
   savePopupOptionSettingList,
 } from "../../../constants/popupList";
 
+const UntypedReactSortable = ReactSortable as React.ComponentType<any>;
+
 class PopupOptionDialog extends React.Component<
   PopupOptionDialogProps,
   PopupOptionDialogState
@@ -76,7 +78,7 @@ class PopupOptionDialog extends React.Component<
           {this.props.t("Customize popup menu")}
         </div>
         <div className="import-dialog-option">
-          <ReactSortable<PopupOptionDialogItem>
+          <UntypedReactSortable
             list={this.state.popupOptionList}
             setList={(popupOptionList) => {
               this.setState({ popupOptionList });
@@ -134,7 +136,7 @@ class PopupOptionDialog extends React.Component<
                 </div>
               );
             })}
-          </ReactSortable>
+          </UntypedReactSortable>
         </div>
         <div className="popup-option-dialog-tip popup-option-dialog-limit">
           {this.props.t("You can enable up to {{count}} options", {

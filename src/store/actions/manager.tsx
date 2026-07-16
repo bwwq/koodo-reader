@@ -1,6 +1,5 @@
 import {
   ConfigService,
-  KookitConfig,
   TokenService,
 } from "../../assets/lib/kookit-extra-browser.min";
 import BookModel from "../../models/Book";
@@ -8,20 +7,17 @@ import PluginModel from "../../models/Plugin";
 import { Dispatch } from "redux";
 import DatabaseService from "../../utils/storage/databaseService";
 import {
-  fetchUserInfo,
-  getUserRequest,
-  resetUserRequest,
-} from "../../utils/request/user";
+  fetchServiceUser,
+  getStoredServiceUser,
+  isServiceSessionConnected,
+  ServiceUser,
+} from "../../utils/request/service";
 import {
   officialDictList,
   officialTranList,
 } from "../../constants/settingList";
 import toast from "react-hot-toast";
 import BookUtil from "../../utils/file/bookUtil";
-import i18n from "../../i18n";
-import { langToName } from "../../utils/common";
-import { resetReaderRequest } from "../../utils/request/reader";
-import { resetThirdpartyRequest } from "../../utils/request/thirdparty";
 import DictUtil from "../../utils/file/dictUtil";
 export function handleBooks(books: BookModel[]) {
   return { type: "HANDLE_BOOKS", payload: books };
@@ -41,8 +37,8 @@ export function handleSearch(isSearch: boolean) {
 export function handleRefreshBookCover(key: string) {
   return { type: "HANDLE_REFRESH_BOOK_COVER", payload: key };
 }
-export function handleUserInfo(userInfo: any) {
-  return { type: "HANDLE_USER_INFO", payload: userInfo };
+export function handleServiceUser(serviceUser: ServiceUser | null) {
+  return { type: "HANDLE_SERVICE_USER", payload: serviceUser };
 }
 export function handleDetailDialog(isDetailDialog: boolean) {
   return { type: "HANDLE_DETAIL_DIALOG", payload: isDetailDialog };
@@ -85,14 +81,11 @@ export function handleSelectedBooks(selectedBooks: string[]) {
 export function handleNewWarning(isNewWarning: boolean) {
   return { type: "HANDLE_NEW_WARNING", payload: isNewWarning };
 }
-export function handleShowSupport(isShowSupport: boolean) {
-  return { type: "HANDLE_SHOW_SUPPORT", payload: isShowSupport };
-}
 export function handleLoadMore(isLoadMore: boolean) {
   return { type: "HANDLE_LOAD_MORE", payload: isLoadMore };
 }
-export function handleAuthed(isAuthed: boolean) {
-  return { type: "HANDLE_AUTHED", payload: isAuthed };
+export function handleServiceConnected(isServiceConnected: boolean) {
+  return { type: "HANDLE_SERVICE_CONNECTED", payload: isServiceConnected };
 }
 export function handleBookSortCode(bookSortCode: {
   sort: number;
@@ -220,59 +213,14 @@ export function handleFetchBooks() {
     // });
   };
 }
-export function handleFetchUserInfo() {
+export function handleFetchServiceUser() {
   return async (dispatch: Dispatch) => {
-    let response = await fetchUserInfo();
-    let userInfo: any = null;
-    if (response.code === 200) {
-      userInfo = response.data;
-      ConfigService.setReaderConfig(
-        "isEnableKoodoSync",
-        userInfo.is_enable_koodo_sync || "no"
-      );
-      if (
-        userInfo.is_enable_koodo_sync === "yes" &&
-        userInfo.default_sync_option &&
-        userInfo.default_sync_token
-      ) {
-        if (
-          ConfigService.getItem("defaultSyncOption") ===
-          userInfo.default_sync_option
-        ) {
-          let encryptedToken = await TokenService.getToken(
-            userInfo.default_sync_option + "_token"
-          );
-          if (encryptedToken !== userInfo.default_sync_token) {
-            await TokenService.setToken(
-              userInfo.default_sync_option + "_token",
-              userInfo.default_sync_token
-            );
-          }
-        }
-      }
-    }
-    if (
-      userInfo &&
-      userInfo.valid_until < parseInt(new Date().getTime() / 1000 + "")
-    ) {
-      dispatch(handleShowSupport(true));
-    }
-    if (userInfo && userInfo.valid_until && userInfo.token_valid_until) {
-      if (
-        userInfo.valid_until > 0 &&
-        userInfo.token_valid_until > 0 &&
-        userInfo.valid_until > userInfo.token_valid_until
-      ) {
-        let userRequest = await getUserRequest();
-        await userRequest.refreshUserToken();
-        resetReaderRequest();
-        resetUserRequest();
-        resetThirdpartyRequest();
-      }
-    }
-
-    dispatch(handleUserInfo(userInfo));
-    return userInfo;
+    const response = await fetchServiceUser();
+    const serviceUser =
+      response.code === 200 ? response.data : await getStoredServiceUser();
+    dispatch(handleServiceUser(serviceUser));
+    dispatch(handleServiceConnected(Boolean(serviceUser)));
+    return serviceUser;
   };
 }
 export function handleFetchPlugins() {
@@ -299,6 +247,36 @@ export function handleFetchPlugins() {
           await DatabaseService.deleteRecord(p.key, "plugins");
         }
         pluginList = pluginList.filter((p: PluginModel) => p.type !== "ai");
+
+        // API keys belong in TokenService, never in the shared model config.
+        const aiModelConfig =
+          ConfigService.getAllObjectConfig("aiModelConfig") || {};
+        for (const [key, rawEntry] of Object.entries(aiModelConfig)) {
+          const entry: any = rawEntry;
+          if (!entry?.config) continue;
+          let config = entry.config;
+          if (typeof config === "string") {
+            try {
+              config = JSON.parse(config);
+            } catch {
+              continue;
+            }
+          }
+          if (config.apiKey) {
+            const existingKey = await TokenService.getToken(
+              `ai_model_key_${key}`
+            );
+            if (!existingKey) {
+              await TokenService.setToken(`ai_model_key_${key}`, config.apiKey);
+            }
+            delete config.apiKey;
+          }
+          ConfigService.setObjectConfig(
+            key,
+            { ...entry, config },
+            "aiModelConfig"
+          );
+        }
 
         // Load local dictionary plugins from ConfigService
         const localDictIds = DictUtil.getDictIds();
@@ -394,152 +372,83 @@ export function handleFetchPlugins() {
             pluginList.push(assistPlugin);
           }
         }
-        TokenService.getToken("is_authed").then((value) => {
-          let isAuthed = value === "yes";
-          if (
-            isAuthed &&
-            ConfigService.getReaderConfig("isDisableAI") !== "yes"
-          ) {
-            let dictPlugin = new PluginModel(
-              "official-ai-dict-plugin",
-              "dictionary",
-              "Official AI Dictionary",
-              "dict",
-              "1.0.0",
-              "",
-              {},
-              officialDictList,
-              [],
-              "",
-              ""
-            );
-            pluginList.push(dictPlugin);
-            let transPlugin = new PluginModel(
-              "official-ai-trans-plugin",
-              "translation",
-              "Official AI Translation",
-              "translation",
-              "1.0.0",
-              "",
-              {},
-              officialTranList,
-              [],
-              "",
-              ""
-            );
-            pluginList.push(transPlugin);
-            let sumPlugin = new PluginModel(
-              "official-ai-assistant-plugin",
-              "assistant",
-              "Official AI Assistant",
-              "assistant",
-              "1.0.0",
-              "",
-              {},
-              officialTranList,
-              [],
-              "",
-              ""
-            );
-            pluginList.push(sumPlugin);
-            let sortedVoiceList = [
-              ...KookitConfig.OfficialVoiceList.map((item) => {
-                return {
-                  ...item,
-                  label:
-                    i18n.t("Official AI Voice") +
-                    " - " +
-                    item.displayName +
-                    " - " +
-                    item.language +
-                    " - " +
-                    (item.gender === "female"
-                      ? i18n.t("Female voice")
-                      : i18n.t("Male voice")),
-                };
-              }),
-              ...KookitConfig.AzureTTSVoiceList.map((item) => {
-                return {
-                  ...item,
-                  label:
-                    "Azure TTS" +
-                    " - " +
-                    item.displayName +
-                    " - " +
-                    langToName(item.locale) +
-                    " - " +
-                    (item.gender === "female"
-                      ? i18n.t("Female voice")
-                      : i18n.t("Male voice")),
-                };
-              }),
-            ];
-            let voicePlugin = new PluginModel(
+        pluginList.push(
+          new PluginModel(
+            "official-ai-trans-plugin",
+            "translation",
+            "Online service / local API translation",
+            "translation",
+            "1.0.0",
+            "",
+            {},
+            officialTranList,
+            [],
+            "",
+            ""
+          ),
+          new PluginModel(
+            "official-ai-dict-plugin",
+            "dictionary",
+            "Online service / local API dictionary",
+            "dict",
+            "1.0.0",
+            "",
+            {},
+            officialDictList,
+            [],
+            "",
+            ""
+          ),
+          new PluginModel(
+            "official-ai-assistant-plugin",
+            "assistant",
+            "Online service / local API assistant",
+            "assistant",
+            "1.0.0",
+            "",
+            {},
+            officialTranList,
+            [],
+            "",
+            ""
+          )
+        );
+        {
+          const voices = [
+            "alloy",
+            "ash",
+            "coral",
+            "echo",
+            "fable",
+            "nova",
+            "onyx",
+            "sage",
+            "shimmer",
+          ];
+          pluginList.push(
+            new PluginModel(
               "official-ai-voice-plugin",
               "voice",
-              "Official AI Voice",
+              "Online service / local API voice",
               "speaker",
               "1.0.0",
               "",
               {},
               {},
-              sortedVoiceList.map((item: any) => {
-                return {
-                  ...item, // 创建新对象
-                  plugin: "official-ai-voice-plugin",
-                  config: {},
-                  displayName: item.label,
-                };
-              }),
+              voices.map((name) => ({
+                name,
+                language: "auto",
+                gender: "neutral",
+                plugin: "official-ai-voice-plugin",
+                config: {},
+                displayName: name,
+              })),
               "",
               ""
-            );
-            pluginList.push(voicePlugin);
-            dispatch(handlePlugins(pluginList));
-          } else if (isAuthed) {
-            let sortedVoiceList = [
-              ...KookitConfig.AzureTTSVoiceList.map((item) => {
-                return {
-                  ...item,
-                  label:
-                    "Azure TTS" +
-                    " - " +
-                    item.displayName +
-                    " - " +
-                    langToName(item.locale) +
-                    " - " +
-                    (item.gender === "female"
-                      ? i18n.t("Female voice")
-                      : i18n.t("Male voice")),
-                };
-              }),
-            ];
-            let voicePlugin = new PluginModel(
-              "official-ai-voice-plugin",
-              "voice",
-              "Official AI Voice",
-              "speaker",
-              "1.0.0",
-              "",
-              {},
-              {},
-              sortedVoiceList.map((item: any) => {
-                return {
-                  ...item, // 创建新对象
-                  plugin: "official-ai-voice-plugin",
-                  config: {},
-                  displayName: item.label,
-                };
-              }),
-              "",
-              ""
-            );
-            pluginList.push(voicePlugin);
-            dispatch(handlePlugins(pluginList));
-          } else {
-            dispatch(handlePlugins(pluginList));
-          }
-        });
+            )
+          );
+        }
+        dispatch(handlePlugins(pluginList));
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
@@ -549,16 +458,12 @@ export function handleFetchPlugins() {
     });
   };
 }
-export function handleFetchAuthed() {
-  return (dispatch: Dispatch) => {
+export function handleFetchServiceConnected() {
+  return async (dispatch: Dispatch) => {
     try {
-      TokenService.getToken("is_authed").then((value) => {
-        let isAuthed = value === "yes";
-        if (isAuthed && !ConfigService.getItem("serverRegion")) {
-          ConfigService.setItem("serverRegion", "global");
-        }
-        dispatch(handleAuthed(isAuthed));
-      });
+      const isConnected = await isServiceSessionConnected();
+      dispatch(handleServiceConnected(isConnected));
+      dispatch(handleServiceUser(await getStoredServiceUser()));
     } catch (error) {
       console.error(error);
     }

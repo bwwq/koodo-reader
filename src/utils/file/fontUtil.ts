@@ -229,9 +229,9 @@ class FontUtil {
     window.dispatchEvent(new Event("font-list-changed"));
   }
 
-  static getFeaturedFontUrl(fontPath: string, isAuthed: boolean): string {
+  static getFeaturedFontUrl(fontPath: string, _isServiceConnected?: boolean): string {
     const base =
-      getServerRegion() === "china" && isAuthed
+      getServerRegion() === "china"
         ? "https://storage.koodoreader.cn"
         : "https://storage.koodoreader.com";
     return `${base}/fonts${fontPath}`;
@@ -244,10 +244,10 @@ class FontUtil {
       style: string;
       url: string;
     },
-    isAuthed: boolean,
+    isServiceConnected: boolean,
     onProgress?: (progress: number) => void
   ): Promise<boolean> {
-    const url = this.getFeaturedFontUrl(font.url, isAuthed);
+    const url = this.getFeaturedFontUrl(font.url, isServiceConnected);
     const response = await fetch(url, {
       headers: {
         "Cache-Control": "no-transform",

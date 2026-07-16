@@ -36,13 +36,6 @@ class MetadataDialog extends React.Component<
     const { searchName, searchAuthor } = this.state;
     if (!searchName.trim() && !searchAuthor.trim()) return;
 
-    if (!this.props.isAuthed) {
-      toast(this.props.t("Please upgrade to Pro to use this feature"));
-      this.props.handleSetting(true);
-      this.props.handleSettingMode("account");
-      return;
-    }
-
     this.setState({
       isLoading: true,
       error: "",

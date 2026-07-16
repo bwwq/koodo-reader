@@ -7,20 +7,20 @@ export interface HeaderProps extends RouteComponentProps<any> {
   isCollapsed: boolean;
   isNewWarning: boolean;
   isLoadMore: boolean;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   currentBook: Book;
   defaultSyncOption: string;
   mode: string;
-  userInfo: any;
+  serviceUser: any;
   bookSortCode: { sort: number; order: number };
   handleSortDisplay: (isSortDisplay: boolean) => void;
   handleSetting: (isSettingOpen: boolean) => void;
   handleAbout: (isAboutOpen: boolean) => void;
   handleLocalFileDialog: (isOpenLocalFileDialog: boolean) => void;
   handleImportDialog: (isOpenImportDialog: boolean) => void;
-  handleFetchAuthed: () => void;
+  handleFetchServiceConnected: () => void;
   handleSearchResults: (results: number[]) => void;
-  handleFetchUserInfo: () => Promise<any>;
+  handleFetchServiceUser: () => Promise<any>;
   handleSettingMode: (settingMode: string) => void;
   handleFetchDefaultSyncOption: () => void;
   handleFetchLoginOptionList: () => void;
@@ -32,7 +32,7 @@ export interface HeaderProps extends RouteComponentProps<any> {
   handleFetchBookmarks: () => void;
   handleReadingBook: (book: Book) => void;
   handleCloudSyncFunc: (
-    cloudSyncFunc: (userInfo: any) => Promise<false | undefined>
+    cloudSyncFunc: (serviceUser: any) => Promise<false | undefined>
   ) => void;
 }
 
@@ -41,7 +41,5 @@ export interface HeaderState {
   language: string;
   width: number;
   isNewVersion: boolean;
-  isHidePro: boolean;
   isSync: boolean;
-  notificationCount: number;
 }

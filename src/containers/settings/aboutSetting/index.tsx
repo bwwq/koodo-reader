@@ -6,7 +6,7 @@ import { withRouter } from "react-router-dom";
 
 const mapStateToProps = (state: stateType) => {
   return {
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
     isNewWarning: state.manager.isNewWarning,
   };
 };

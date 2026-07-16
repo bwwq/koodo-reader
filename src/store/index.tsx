@@ -12,6 +12,7 @@ import NoteModel from "../models/Note";
 import BookmarkModel from "../models/Bookmark";
 import HtmlBookModel from "../models/HtmlBook";
 import PluginModel from "../models/Plugin";
+import { ServiceUser } from "../utils/request/service";
 import { HighlightValue } from "../utils/common";
 const rootReducer = combineReducers({
   book,
@@ -45,11 +46,10 @@ export type stateType = {
     isAboutOpen: boolean;
     isShowLoading: boolean;
     isShowPopupNote: boolean;
-    isShowSupport: boolean;
     isLoadMore: boolean;
     isShowNew: boolean;
-    userInfo: any;
-    isAuthed: boolean;
+    serviceUser: ServiceUser | null;
+    isServiceConnected: boolean;
     isNewWarning: boolean;
     isSelectBook: boolean;
     selectedBooks: string[];

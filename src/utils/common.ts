@@ -1,4 +1,4 @@
-﻿import Plugin from "../models/Plugin";
+import Plugin from "../models/Plugin";
 import { isElectron } from "react-device-detect";
 import CryptoJS from "crypto-js";
 import {
@@ -12,7 +12,6 @@ import Book from "../models/Book";
 import BookUtil from "./file/bookUtil";
 import * as Kookit from "../assets/lib/kookit.min";
 import DatabaseService from "./storage/databaseService";
-import packageJson from "../../package.json";
 import toast from "react-hot-toast";
 import i18n from "../i18n";
 import {
@@ -644,52 +643,6 @@ export const loadFontData = async () => {
 export function removeSearchParams() {
   const url = new URL(window.location.href.split("?")[0]);
   window.history.replaceState({}, document.title, url.toString());
-}
-export const getChatLocale = () => {
-  if (navigator.language.startsWith("zh")) {
-    return "zh_CN";
-  } else {
-    return "en";
-  }
-};
-export async function addChatBox() {
-  let deviceUuid = await TokenService.getFingerprint();
-  const scriptContent = `
-    (function (d, t) {
-      var BASE_URL = "https://app.chatwoot.com";
-      var g = d.createElement(t),
-        s = d.getElementsByTagName(t)[0];
-      g.src = BASE_URL + "/packs/js/sdk.js";
-      g.defer = true;
-      g.async = true;
-      s.parentNode.insertBefore(g, s);
-      g.onload = function () {
-        window.chatwootSDK.run({
-          websiteToken: "svaD5wxfU5UY1r5ZzpMtLqv2",
-          baseUrl: BASE_URL,
-        });
-        window.addEventListener('chatwoot:ready', function() {
-          window.$chatwoot.setLocale('${getChatLocale()}');
-          window.$chatwoot.setCustomAttributes({
-            version: '${packageJson.version}',
-            client: 'web',
-            device: '${deviceUuid}',
-          });
-        });
-      };
-    })(document, "script");
-  `;
-
-  const scriptElement = document.createElement("script");
-  scriptElement.type = "text/javascript";
-  scriptElement.text = scriptContent;
-  document.head.appendChild(scriptElement);
-}
-export function removeChatBox() {
-  const scriptElement = document.querySelector("script[src*='chatwoot']");
-  if (scriptElement) {
-    scriptElement.remove();
-  }
 }
 export const preCacheAllBooks = async (bookList: Book[]) => {
   for (let index = 0; index < bookList.length; index++) {
@@ -1329,7 +1282,7 @@ export const clearAllData = async () => {
   }
   await localforage.clear();
 };
-export const resetKoodoSync = async () => {
+export const resetOnlineSync = async () => {
   let encryptToken = await TokenService.getToken(
     ConfigService.getItem("defaultSyncOption") + "_token"
   );
@@ -1378,7 +1331,7 @@ export const handleAutoCloudSync = async () => {
       "defaultSyncOption",
       syncRes.data.default_sync_option
     );
-    ConfigService.setReaderConfig("isEnableKoodoSync", "yes");
+    ConfigService.setReaderConfig("isEnableOnlineSync", "yes");
     await TokenService.setToken(
       syncRes.data.default_sync_option + "_token",
       syncRes.data.default_sync_token
@@ -1724,15 +1677,17 @@ export const prepareThirdConfig = async (service: string, config: any) => {
     ) {
       config.refresh_token = res.data.refresh_token;
       config.access_token = res.data.access_token;
-      config.expires_at = new Date().getTime() + res.data.expires_in * 1000;
+      config.expires_at =
+        new Date().getTime() + (res.data.expires_in || 3600) * 1000;
     } else {
       config.access_token = res.data.access_token;
-      config.expires_at = new Date().getTime() + res.data.expires_in * 1000;
+      config.expires_at =
+        new Date().getTime() + (res.data.expires_in || 3600) * 1000;
     }
     let response: any = await encryptToken(service, config);
     if (response.code === 200) {
       if (
-        ConfigService.getReaderConfig("isEnableKoodoSync") === "yes" &&
+        ConfigService.getReaderConfig("isEnableOnlineSync") === "yes" &&
         ConfigService.getItem("defaultSyncOption") === service
       ) {
         let syncToken = await TokenService.getToken(service + "_token");

@@ -9,7 +9,7 @@ export interface PopupAssistProps {
   originalText: string;
   quoteText: string;
   plugins: PluginModel[];
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   handleQuoteText: (quoteText: string) => void;
   handleOpenMenu: (isOpenMenu: boolean) => void;
   handleMenuMode: (menu: string) => void;

@@ -21,7 +21,7 @@ class Redirect extends React.Component<RedirectProps, RedirectState> {
   constructor(props: RedirectProps) {
     super(props);
     this.state = {
-      isAuthed: false,
+      isServiceConnected: false,
       isError: false,
       token: "",
     };
@@ -51,7 +51,7 @@ class Redirect extends React.Component<RedirectProps, RedirectState> {
         params.code = params.code + "$" + params.locationid;
       }
       this.setState({ token: params.code });
-      this.setState({ isAuthed: true });
+      this.setState({ isServiceConnected: true });
       let state = params.state;
       // boxnet doesn't allow | in state
       if (state) {
@@ -81,12 +81,12 @@ class Redirect extends React.Component<RedirectProps, RedirectState> {
     if (url.indexOf("access_token") > -1) {
       let params: any = getParamsFromUrl();
       this.setState({ token: params.access_token });
-      this.setState({ isAuthed: true });
+      this.setState({ isServiceConnected: true });
     }
   }
 
   render() {
-    if (this.state.isError || this.state.isAuthed) {
+    if (this.state.isError || this.state.isServiceConnected) {
       return (
         <div className="backup-page-finish-container">
           <Toaster
@@ -100,7 +100,7 @@ class Redirect extends React.Component<RedirectProps, RedirectState> {
             }}
           />
           <div className="backup-page-finish">
-            {this.state.isAuthed ? (
+            {this.state.isServiceConnected ? (
               <Lottie
                 animationData={animationSuccess}
                 loop={false}
@@ -112,12 +112,12 @@ class Redirect extends React.Component<RedirectProps, RedirectState> {
 
             <div className="backup-page-finish-text">
               <Trans>
-                {this.state.isAuthed
+                {this.state.isServiceConnected
                   ? "Authorisation successful"
                   : "Authorisation failed"}
               </Trans>
             </div>
-            {this.state.isAuthed ? (
+            {this.state.isServiceConnected ? (
               <div
                 className="token-dialog-token-text"
                 onClick={() => {

@@ -9,15 +9,85 @@ import SqlUtil from "./sqlUtil";
 import { isElectron } from "react-device-detect";
 import { getStorageLocation } from "../common";
 import { getCloudConfig } from "./common";
-import { getThirdpartyRequest } from "../request/thirdparty";
-import { handleExitApp } from "../request/common";
-import toast from "react-hot-toast";
-import i18n from "../../i18n";
+import {
+  getOnlineSyncItem,
+  putOnlineSyncItems,
+  SyncItem,
+} from "../request/thirdparty";
 import Note from "../../models/Note";
+
+interface SyncEnvelope {
+  schema: "dual-v1";
+  version: number;
+  updated_at: number;
+  content: string;
+}
+
+const makeEnvelope = (content: string, version = Date.now()): SyncEnvelope => ({
+  schema: "dual-v1",
+  version,
+  updated_at: version > 0 ? Date.now() : 0,
+  content,
+});
+
+const normalizeTimestamp = (value: number | string | undefined): number => {
+  if (value === undefined || value === null || value === "") return 0;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return numeric > 0 && numeric < 1_000_000_000_000
+      ? numeric * 1000
+      : numeric;
+  }
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const parseEnvelope = (raw: string | undefined, fallback: string): SyncEnvelope => {
+  if (!raw) return makeEnvelope(fallback, 0);
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.schema === "dual-v1" && typeof parsed.content === "string") {
+      return parsed as SyncEnvelope;
+    }
+  } catch {
+    // Legacy payloads are represented below with version zero.
+  }
+  return { schema: "dual-v1", version: 0, updated_at: 0, content: raw };
+};
+
+const fromOnlineItem = (
+  item: SyncItem | undefined,
+  fallback: string
+): SyncEnvelope =>
+  item
+    ? {
+        schema: "dual-v1",
+        version: Number(item.version) || 0,
+        updated_at: normalizeTimestamp(item.updated_at),
+        content: item.content || fallback,
+      }
+    : makeEnvelope(fallback, 0);
+
+const newest = (a: SyncEnvelope, b: SyncEnvelope): SyncEnvelope => {
+  // Provider and online-service versions use independent counters. Their
+  // timestamps are the only comparable freshness signal across both stores.
+  if (a.updated_at !== b.updated_at) return a.updated_at > b.updated_at ? a : b;
+  return a.version >= b.version ? a : b;
+};
 
 class ConfigUtil {
   public static syncData: any = {};
   public static updateData: any = {};
+  public static updateVersions: Record<string, number> = {};
+  public static onlineVersions: Record<string, number> = {};
+  public static providerMirrorTypes = new Set<string>();
+  static resetOnlineState() {
+    this.syncData = {};
+    this.updateData = {};
+    this.updateVersions = {};
+    this.onlineVersions = {};
+    this.providerMirrorTypes.clear();
+  }
   static async downloadConfig(type: string) {
     if (isElectron) {
       const { ipcRenderer } = window.require("electron");
@@ -72,10 +142,11 @@ class ConfigUtil {
         }
       }
     }
-    if (ConfigService.getReaderConfig("isEnableKoodoSync") === "yes") {
-      this.updateData[type] = JSON.stringify(config);
-      return;
-    }
+    const content = JSON.stringify(config);
+    const version = Date.now();
+    const envelope = makeEnvelope(content, version);
+    this.updateData[type] = content;
+    this.updateVersions[type] = this.onlineVersions[type] || 0;
     if (isElectron) {
       const { ipcRenderer } = window.require("electron");
       let service = ConfigService.getItem("defaultSyncOption");
@@ -89,7 +160,7 @@ class ConfigUtil {
       }
       fs.writeFileSync(
         getStorageLocation() + "/config/" + type + ".json",
-        JSON.stringify(config)
+        JSON.stringify(envelope)
       );
 
       await ipcRenderer.invoke("cloud-upload", {
@@ -101,7 +172,7 @@ class ConfigUtil {
       });
     } else {
       let syncUtil = await SyncService.getSyncUtil();
-      let configBlob = new Blob([JSON.stringify(config)], {
+      let configBlob = new Blob([JSON.stringify(envelope)], {
         type: "application/json",
       });
       await syncUtil.uploadFile(type + ".json", "config", configBlob);
@@ -112,113 +183,183 @@ class ConfigUtil {
     if (this.syncData[type]) {
       return JSON.parse(this.syncData[type] || defaultValue);
     }
-    let thirdpartyRequest = await getThirdpartyRequest();
-
-    let response = await thirdpartyRequest.getSyncDataByType({ type });
+    const response = await getOnlineSyncItem(type);
     if (response.code === 200) {
-      this.syncData[type] = response.data;
+      this.onlineVersions[type] = Number(response.data.version) || 0;
+      this.syncData[type] = response.data.content;
       return JSON.parse(this.syncData[type] || defaultValue);
-    } else if (response.code === 401) {
-      handleExitApp();
-      return null;
-    } else {
-      toast.error(
-        i18n.t("Synchronization failed, error code") + ": " + response.msg
-      );
-      if (response.code === 20004) {
-        toast(
-          i18n.t("Please login again to update your membership on this device")
-        );
-      }
-      return null;
     }
+    this.onlineVersions[type] = 0;
+    return null;
   }
   static async updateSyncData() {
-    let thirdpartyRequest = await getThirdpartyRequest();
-
-    let response = await thirdpartyRequest.updateSyncData(this.updateData);
-    if (response.code === 200) {
-    } else if (response.code === 401) {
-      handleExitApp();
-    } else {
-      toast.error(
-        i18n.t("Synchronization failed, error code") + ": " + response.msg
+    for (const type of Array.from(this.providerMirrorTypes)) {
+      if (type === "sync" || type === "config") {
+        await this.uploadConfig(type);
+      } else {
+        await this.uploadDatabase(type);
+      }
+      this.providerMirrorTypes.delete(type);
+    }
+    if (Object.keys(this.updateData).length > 0) {
+      const response = await putOnlineSyncItems(
+        this.updateData,
+        this.updateVersions
       );
-      if (response.code === 20004) {
-        toast(
-          i18n.t("Please login again to update your membership on this device")
-        );
+      if (response.code === 409) {
+        this.syncData = {};
+        throw new Error("Online sync version conflict");
+      }
+      if (response.code !== 200 && response.code !== 410) {
+        throw new Error(response.msg || "Online sync failed");
+      }
+      if (response.code === 200) {
+        Object.keys(this.updateData).forEach((type) => {
+          const savedItem = response.data?.[type];
+          this.onlineVersions[type] = savedItem
+            ? Number(savedItem.version) || 0
+            : (this.onlineVersions[type] || 0) + 1;
+        });
       }
     }
-
     this.syncData = {};
     this.updateData = {};
+    this.updateVersions = {};
   }
   static async getCloudConfig(type: string) {
-    if (ConfigService.getReaderConfig("isEnableKoodoSync") === "yes") {
-      let config = await this.getSyncData(type);
-      return config || {};
+    const [providerRaw, online] = await Promise.all([
+      ConfigUtil.downloadConfig(type).catch(() => undefined),
+      getOnlineSyncItem(type),
+    ]);
+    const provider = parseEnvelope(providerRaw, "{}");
+    const service = fromOnlineItem(
+      online.code === 200 ? online.data : undefined,
+      "{}"
+    );
+    this.onlineVersions[type] =
+      online.code === 200 ? Number(online.data.version) || 0 : 0;
+    const selected = newest(provider, service);
+    if (provider.updated_at > service.updated_at) {
+      this.updateData[type] = provider.content;
+      this.updateVersions[type] = this.onlineVersions[type];
+    } else if (service.updated_at > provider.updated_at) {
+      this.providerMirrorTypes.add(type);
     }
-    let configStr = (await ConfigUtil.downloadConfig(type)) || "{}";
-    return JSON.parse(configStr);
+    this.syncData[type] = selected.content;
+    try {
+      return JSON.parse(selected.content || "{}");
+    } catch {
+      return {};
+    }
   }
 
   static async getCloudDatabase(database: string) {
-    if (ConfigService.getReaderConfig("isEnableKoodoSync") === "yes") {
-      let data = await this.getSyncData(database);
-      return data || [];
+    const loadProvider = async (): Promise<SyncEnvelope> => {
+      const service = ConfigService.getItem("defaultSyncOption");
+      if (!service) return makeEnvelope("[]", 0);
+      if (isElectron) {
+        const { ipcRenderer } = window.require("electron");
+        const tokenConfig = await getCloudConfig(service);
+        const result = await ipcRenderer.invoke("cloud-download", {
+          ...tokenConfig,
+          fileName: database + ".db",
+          service,
+          type: "config",
+          isTemp: true,
+          storagePath: getStorageLocation(),
+        });
+        if (!result) return makeEnvelope("[]", 0);
+        const records = await DatabaseService.getAllRecords("temp-" + database);
+        await ipcRenderer.invoke("close-database", {
+          dbName: "temp-" + database,
+          storagePath: getStorageLocation(),
+        });
+        let meta: any = {};
+        const metaResult = await ipcRenderer.invoke("cloud-download", {
+          ...tokenConfig,
+          fileName: database + ".meta.json",
+          service,
+          type: "config",
+          storagePath: getStorageLocation(),
+        });
+        if (metaResult) {
+          try {
+            const fs = window.require("fs");
+            meta = JSON.parse(
+              fs.readFileSync(
+                getStorageLocation() + "/config/" + database + ".meta.json",
+                "utf-8"
+              )
+            );
+          } catch {
+            meta = {};
+          }
+        }
+        return {
+          schema: "dual-v1",
+          version: Number(meta.version) || 0,
+          updated_at: Number(meta.updated_at) || 0,
+          content: JSON.stringify(records),
+        };
+      }
+      const syncUtil = await SyncService.getSyncUtil();
+      const [dbBuffer, metaBuffer] = await Promise.all([
+        syncUtil.downloadFile(database + ".db", "config"),
+        syncUtil.downloadFile(database + ".meta.json", "config"),
+      ]);
+      if (!dbBuffer) return makeEnvelope("[]", 0);
+      const records = await new SqlUtil().dbBufferToJson(dbBuffer, database);
+      let meta: any = {};
+      try {
+        meta = metaBuffer
+          ? JSON.parse(new TextDecoder().decode(metaBuffer))
+          : {};
+      } catch {
+        meta = {};
+      }
+      return {
+        schema: "dual-v1",
+        version: Number(meta.version) || 0,
+        updated_at: Number(meta.updated_at) || 0,
+        content: JSON.stringify(records),
+      };
+    };
+    const [provider, online] = await Promise.all([
+      loadProvider().catch(() => makeEnvelope("[]", 0)),
+      getOnlineSyncItem(database),
+    ]);
+    this.onlineVersions[database] =
+      online.code === 200 ? Number(online.data.version) || 0 : 0;
+    const selected = newest(
+      provider,
+      fromOnlineItem(online.code === 200 ? online.data : undefined, "[]")
+    );
+    const service = fromOnlineItem(
+      online.code === 200 ? online.data : undefined,
+      "[]"
+    );
+    if (provider.updated_at > service.updated_at) {
+      this.updateData[database] = provider.content;
+      this.updateVersions[database] = this.onlineVersions[database];
+    } else if (service.updated_at > provider.updated_at) {
+      this.providerMirrorTypes.add(database);
     }
-    if (isElectron) {
-      const { ipcRenderer } = window.require("electron");
-      let service = ConfigService.getItem("defaultSyncOption");
-      if (!service) {
-        return;
-      }
-      let tokenConfig = await getCloudConfig(service);
-
-      let result = await ipcRenderer.invoke("cloud-download", {
-        ...tokenConfig,
-        fileName: database + ".db",
-        service: service,
-        type: "config",
-        isTemp: true,
-        storagePath: getStorageLocation(),
-      });
-      if (!result) {
-        console.error("no database file");
-        return [];
-      }
-      let cloudRecords = await DatabaseService.getAllRecords(
-        "temp-" + database
-      );
-      await ipcRenderer.invoke("close-database", {
-        dbName: "temp-" + database,
-        storagePath: getStorageLocation(),
-      });
-      return cloudRecords;
-    } else {
-      let syncUtil = await SyncService.getSyncUtil();
-      let dbBuffer = await syncUtil.downloadFile(database + ".db", "config");
-      if (!dbBuffer) {
-        return [];
-      }
-      let sqlUtil = new SqlUtil();
-      let cloudRecords = await sqlUtil.dbBufferToJson(dbBuffer, database);
-      return cloudRecords;
+    this.syncData[database] = selected.content;
+    try {
+      return JSON.parse(selected.content || "[]");
+    } catch {
+      return [];
     }
   }
   static async uploadDatabase(type: string) {
-    if (ConfigService.getReaderConfig("isEnableKoodoSync") === "yes") {
-      let data = await DatabaseService.getAllRecords(type);
-      if (type === "books") {
-        data = data.map((record) => {
-          record.cover = "";
-          return record;
-        });
-      }
-      this.updateData[type] = JSON.stringify(data);
-      return;
+    let data = await DatabaseService.getAllRecords(type);
+    if (type === "books") {
+      data = data.map((record) => ({ ...record, cover: "" }));
     }
+    const version = Date.now();
+    this.updateData[type] = JSON.stringify(data);
+    this.updateVersions[type] = this.onlineVersions[type] || 0;
+    const meta = { schema: "dual-v1", version, updated_at: Date.now() };
     if (isElectron) {
       const { ipcRenderer } = window.require("electron");
       await ipcRenderer.invoke("close-database", {
@@ -230,11 +371,24 @@ class ConfigUtil {
         return;
       }
       let tokenConfig = await getCloudConfig(service);
-
-      return await ipcRenderer.invoke("cloud-upload", {
+      const fs = window.require("fs");
+      const configPath = getStorageLocation() + "/config";
+      if (!fs.existsSync(configPath)) fs.mkdirSync(configPath, { recursive: true });
+      fs.writeFileSync(
+        configPath + "/" + type + ".meta.json",
+        JSON.stringify(meta)
+      );
+      await ipcRenderer.invoke("cloud-upload", {
         ...tokenConfig,
         fileName: type + ".db",
         service: service,
+        type: "config",
+        storagePath: getStorageLocation(),
+      });
+      return await ipcRenderer.invoke("cloud-upload", {
+        ...tokenConfig,
+        fileName: type + ".meta.json",
+        service,
         type: "config",
         storagePath: getStorageLocation(),
       });
@@ -243,6 +397,11 @@ class ConfigUtil {
       let dbBlob = new Blob([dbBuffer], { type: CommonTool.getMimeType("db") });
       let syncUtil = await SyncService.getSyncUtil();
       await syncUtil.uploadFile(type + ".db", "config", dbBlob);
+      await syncUtil.uploadFile(
+        type + ".meta.json",
+        "config",
+        new Blob([JSON.stringify(meta)], { type: "application/json" })
+      );
     }
   }
   static async getNotesByBookKeyAndTypeWithSort(
@@ -556,8 +715,7 @@ class ConfigUtil {
     }
   }
   static async isCloudEmpty() {
-    let syncDataStr = await this.downloadConfig("sync");
-    let syncData = JSON.parse(syncDataStr || "{}");
+    const syncData = await this.getCloudConfig("sync");
     if (!syncData || Object.keys(syncData).length === 0) {
       return true;
     }

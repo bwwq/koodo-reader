@@ -39,7 +39,7 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
       favoriteBooks: Object.keys(
         ConfigService.getAllListConfig("favoriteBooks")
       ).length,
-      isAuthed: false,
+      isServiceConnected: false,
       isError: false,
       isCopied: false,
       isUpdated: false,
@@ -244,10 +244,7 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
             this.props.handleAddDialog(false);
             this.props.handleDetailDialog(false);
             this.props.handleLoadingDialog(false);
-            if (!this.props.isAuthed) {
-              this.props.handleNewDialog(false);
-              this.props.handleShowSupport(false);
-            }
+            this.props.handleNewDialog(false);
             this.props.handleLocalFileDialog(false);
             this.props.handleImportDialog(false);
             this.props.handleShowPopupNote(false);
@@ -261,7 +258,6 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
             this.props.isOpenOPDSDialog ||
             this.props.isOpenSortShelfDialog ||
             this.props.isShowNew ||
-            this.props.isShowSupport ||
             this.props.isOpenDeleteDialog ||
             this.props.isOpenEditDialog ||
             this.props.isOpenLocalFileDialog ||

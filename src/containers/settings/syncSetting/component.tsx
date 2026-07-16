@@ -12,12 +12,11 @@ import {
   confirmBrowserExtensionAsync,
   generateSyncRecord,
   getICloudDrivePath,
-  getServerRegion,
   getWebsiteUrl,
   handleContextMenu,
   openExternalUrl,
   openInBrowser,
-  resetKoodoSync,
+  resetOnlineSync,
   showTaskProgress,
   testConnection,
   testCORS,
@@ -29,17 +28,16 @@ import { backup } from "../../../utils/file/backup";
 import { restore } from "../../../utils/file/restore";
 import {
   ConfigService,
-  KookitConfig,
   SyncHelper,
-  SyncUtil,
   TokenService,
 } from "../../../assets/lib/kookit-extra-browser.min";
 import {
+  authorizeThirdProvider,
   encryptToken,
   onSyncCallback,
 } from "../../../utils/request/thirdparty";
 import SyncService from "../../../utils/storage/syncService";
-import { updateUserConfig } from "../../../utils/request/user";
+import { bindSyncToCurrentUser } from "../../../utils/request/service";
 import BookUtil from "../../../utils/file/bookUtil";
 import Book from "../../../models/Book";
 import ConfigUtil from "../../../utils/file/configUtil";
@@ -52,8 +50,8 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
       autoOffline: ConfigService.getReaderConfig("autoOffline") === "yes",
       isDisableAutoSync:
         ConfigService.getReaderConfig("isDisableAutoSync") === "yes",
-      isEnableKoodoSync:
-        ConfigService.getReaderConfig("isEnableKoodoSync") === "yes",
+      isEnableOnlineSync:
+        ConfigService.getReaderConfig("isEnableOnlineSync") === "yes",
       hideSyncProgress:
         ConfigService.getReaderConfig("hideSyncProgress") === "yes",
       driveConfig: {},
@@ -70,6 +68,24 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
   };
   handleJump = (url: string) => {
     openInBrowser(url);
+  };
+  handleAuthorize = async (provider: string) => {
+    if (!this.props.isServiceConnected) {
+      toast.error(
+        this.props.t("Connect an online service before using OAuth storage")
+      );
+      this.props.handleSettingMode("account");
+      return;
+    }
+    const response = await authorizeThirdProvider(
+      provider,
+      window.location.origin + "/redirect"
+    );
+    if (response.code !== 200 || !response.data.authorization_url) {
+      toast.error(response.msg || this.props.t("Authorization failed"));
+      return;
+    }
+    this.handleJump(response.data.authorization_url);
   };
   handleSetting = (stateName: string) => {
     this.setState({ [stateName]: !this.state[stateName] } as any);
@@ -103,12 +119,6 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
       );
       return;
     }
-    if (!this.props.isAuthed) {
-      toast(this.props.t("Please upgrade to Pro to use this feature"));
-      this.props.handleSetting(true);
-      this.props.handleSettingMode("account");
-      return;
-    }
     if (
       !isElectron &&
       driveList.find((item) => item.value === targetDrive)?.needExtension
@@ -116,15 +126,6 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
       if (!(await confirmBrowserExtensionAsync())) {
         return;
       }
-    }
-    if (
-      driveList.find((item) => item.value === targetDrive)?.isPro &&
-      !this.props.isAuthed
-    ) {
-      toast(this.props.t("Please upgrade to Pro to use this feature"));
-      this.props.handleSetting(true);
-      this.props.handleSettingMode("account");
-      return;
     }
     this.props.handleSettingDrive(targetDrive);
     let settingDrive = targetDrive;
@@ -174,10 +175,10 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
       }
       ConfigService.setListConfig(settingDrive, "dataSourceList");
       toast.success(i18n.t("Binding successful"), { id: "adding-sync-id" });
-      if (this.props.isAuthed && !ConfigService.getItem("defaultSyncOption")) {
+      if (!ConfigService.getItem("defaultSyncOption")) {
         ConfigService.setItem("defaultSyncOption", settingDrive);
-        if (ConfigService.getReaderConfig("isEnableKoodoSync") === "yes") {
-          resetKoodoSync();
+        if (ConfigService.getReaderConfig("isEnableOnlineSync") === "yes") {
+          resetOnlineSync();
         }
         this.props.handleFetchDefaultSyncOption();
       }
@@ -197,18 +198,7 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
       settingDrive === "microsoft_exp" ||
       settingDrive === "microsoft"
     ) {
-      this.handleJump(
-        new SyncUtil(settingDrive, {}).getAuthUrl(
-          getServerRegion() === "china" &&
-            (settingDrive === "microsoft" ||
-              settingDrive === "microsoft_exp" ||
-              settingDrive === "dubox" ||
-              settingDrive === "yiyiwu" ||
-              settingDrive === "adrive")
-            ? KookitConfig.ThirdpartyConfig.cnCallbackUrl
-            : KookitConfig.ThirdpartyConfig.callbackUrl
-        )
-      );
+      await this.handleAuthorize(settingDrive);
     }
   };
   handleDeleteDataSource = async (event: any) => {
@@ -226,12 +216,13 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
       });
     }
     ConfigService.deleteListConfig(targetDrive, "dataSourceList");
+    ConfigService.removeItem(targetDrive + "_needsReconnect");
     this.props.handleFetchDataSourceList();
     if (targetDrive === ConfigService.getItem("defaultSyncOption")) {
       ConfigService.removeItem("defaultSyncOption");
       this.props.handleFetchDefaultSyncOption();
-      if (ConfigService.getReaderConfig("isEnableKoodoSync") === "yes") {
-        resetKoodoSync();
+      if (ConfigService.getReaderConfig("isEnableOnlineSync") === "yes") {
+        resetOnlineSync();
       }
     }
     toast.success(this.props.t("Deletion successful"));
@@ -240,26 +231,19 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
     if (!newValue) {
       return;
     }
-    if (!this.props.isAuthed) {
-      toast(this.props.t("Please upgrade to Pro to use this feature"));
-      this.props.handleSetting(true);
-      this.props.handleSettingMode("account");
-      return;
-    }
-
     ConfigService.setItem("defaultSyncOption", newValue);
-    if (ConfigService.getReaderConfig("isEnableKoodoSync") === "yes") {
-      resetKoodoSync();
+    if (ConfigService.getReaderConfig("isEnableOnlineSync") === "yes") {
+      resetOnlineSync();
     }
     this.props.handleFetchDefaultSyncOption();
     toast.success(this.props.t("Change successful"));
     if (
       !(await ConfigUtil.isCloudEmpty()) &&
-      ConfigService.getReaderConfig("isEnableKoodoSync") === "yes"
+      ConfigService.getReaderConfig("isEnableOnlineSync") === "yes"
     ) {
       toast(
         this.props.t(
-          "This data source already contains a library. If you need to merge local and cloud data, please turn off Koodo Sync and resync."
+          "This data source already contains a library. If you need to merge local and cloud data, please turn off Online reading data sync and resync."
         ),
         {
           duration: 10000,
@@ -295,15 +279,6 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
           "Koodo Reader's web version are limited by the browser, for more powerful features, please download the desktop version."
         )
       );
-      return;
-    }
-    if (
-      driveList.find((item) => item.value === targetDrive)?.isPro &&
-      !this.props.isAuthed
-    ) {
-      toast(this.props.t("Please upgrade to Pro to use this feature"));
-      this.props.handleSetting(true);
-      this.props.handleSettingMode("account");
       return;
     }
     this.setState({
@@ -448,10 +423,10 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
         service: this.props.settingDrive,
       });
     }
-    if (this.props.isAuthed && !ConfigService.getItem("defaultSyncOption")) {
+    if (!ConfigService.getItem("defaultSyncOption")) {
       ConfigService.setItem("defaultSyncOption", this.props.settingDrive);
-      if (ConfigService.getReaderConfig("isEnableKoodoSync") === "yes") {
-        resetKoodoSync();
+      if (ConfigService.getReaderConfig("isEnableOnlineSync") === "yes") {
+        resetOnlineSync();
       }
       this.props.handleFetchDefaultSyncOption();
     }
@@ -475,23 +450,35 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
               className="single-control-switch"
               onClick={async () => {
                 switch (item.propName) {
-                  case "isEnableKoodoSync":
+                  case "isEnableOnlineSync":
+                    if (this.state.isEnableOnlineSync) {
+                      this.handleSetting(item.propName);
+                      break;
+                    }
+                    if (!this.props.isServiceConnected) {
+                      toast.error(
+                        this.props.t(
+                          "Connect and bind an online service before enabling online sync"
+                        )
+                      );
+                      this.props.handleSettingMode("account");
+                      return;
+                    }
+                    if (!(await bindSyncToCurrentUser())) {
+                      toast.error(
+                        this.props.t(
+                          "This local library is bound to another account"
+                        )
+                      );
+                      return;
+                    }
                     this.handleSetting(item.propName);
-                    let encryptToken = await TokenService.getToken(
-                      this.props.defaultSyncOption + "_token"
-                    );
-                    await updateUserConfig({
-                      is_enable_koodo_sync:
-                        ConfigService.getReaderConfig("isEnableKoodoSync"),
-                      default_sync_option: this.props.defaultSyncOption,
-                      default_sync_token: encryptToken || "",
-                    });
-                    let userInfo = await this.props.handleFetchUserInfo();
+                    let serviceUser = await this.props.handleFetchServiceUser();
                     if (
-                      ConfigService.getReaderConfig("isEnableKoodoSync") ===
+                      ConfigService.getReaderConfig("isEnableOnlineSync") ===
                       "yes"
                     ) {
-                      this.props.cloudSyncFunc(userInfo);
+                      this.props.cloudSyncFunc(serviceUser);
                     }
 
                     break;
@@ -636,7 +623,7 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
                   }}
                 >
                   <span className="account-login-option-label">
-                    {this.props.t(item.label) + (item.isPro ? " (Pro)" : "")}
+                    {this.props.t(item.label)}
                   </span>
                 </div>
               ))}
@@ -861,18 +848,7 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
                     className="voice-add-confirm"
                     style={{ marginRight: "10px" }}
                     onClick={async () => {
-                      this.handleJump(
-                        new SyncUtil(this.props.settingDrive, {}).getAuthUrl(
-                          getServerRegion() === "china" &&
-                            (this.props.settingDrive === "microsoft" ||
-                              this.props.settingDrive === "microsoft_exp" ||
-                              this.props.settingDrive === "dubox" ||
-                              this.props.settingDrive === "yiyiwu" ||
-                              this.props.settingDrive === "adrive")
-                            ? KookitConfig.ThirdpartyConfig.cnCallbackUrl
-                            : KookitConfig.ThirdpartyConfig.callbackUrl
-                        )
-                      );
+                      await this.handleAuthorize(this.props.settingDrive);
                     }}
                   >
                     <Trans>Authorize</Trans>
@@ -1012,7 +988,11 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
                   key={item.value}
                   className="lang-setting-option"
                 >
-                  {this.props.t(item.label) + (item.isPro ? " (Pro)" : "")}
+                  {this.props.t(item.label)}
+                  {ConfigService.getItem(item.value + "_needsReconnect") ===
+                  "yes"
+                    ? ` (${this.props.t("Reconnect required")})`
+                    : ""}
                 </option>
               ))}
           </select>
@@ -1036,7 +1016,7 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
                   key={item.value}
                   className="lang-setting-option"
                 >
-                  {this.props.t(item.label) + (item.isPro ? " (Pro)" : "")}
+                  {this.props.t(item.label)}
                 </option>
               ))}
           </select>
@@ -1071,7 +1051,7 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
                   key={item.value}
                   className="lang-setting-option"
                 >
-                  {this.props.t(item.label) + (item.isPro ? " (Pro)" : "")}
+                  {this.props.t(item.label)}
                 </option>
               ))}
           </select>
@@ -1106,14 +1086,14 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
                   key={item.value}
                   className="lang-setting-option"
                 >
-                  {this.props.t(item.label) + (item.isPro ? " (Pro)" : "")}
+                  {this.props.t(item.label)}
                 </option>
               ))}
           </select>
         </div>
 
-        {this.props.isAuthed && this.renderSwitchOption(syncSettingList)}
-        {this.props.isAuthed && (
+        {this.renderSwitchOption(syncSettingList)}
+        {
           <>
             <div className="setting-dialog-new-title">
               <Trans>Scheduled sync interval</Trans>
@@ -1211,12 +1191,12 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
             <p className="setting-option-subtitle">
               <Trans>
                 {
-                  "Data in other devices is messed up, but the data in this device is normal. You can reset the sync record in this device, delete the KoodoReader/config folder in the data source(Turn off Koodo Sync if necessary), and sync again. This should resolve the issue"
+                  "Data in other devices is messed up, but the data in this device is normal. You can reset the sync record in this device, delete the KoodoReader/config folder in the data source(Turn off Online reading data sync if necessary), and sync again. This should resolve the issue"
                 }
               </Trans>
             </p>
           </>
-        )}
+        }
       </>
     );
   }

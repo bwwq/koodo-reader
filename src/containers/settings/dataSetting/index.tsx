@@ -7,7 +7,7 @@ import { handleFetchBooks } from "../../../store/actions";
 
 const mapStateToProps = (state: stateType) => {
   return {
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
   };
 };
 const actionCreator = { handleFetchBooks };

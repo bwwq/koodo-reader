@@ -12,7 +12,7 @@ import {
   handleSettingMode,
   handleSettingDrive,
   handleLoadingDialog,
-  handleFetchAuthed,
+  handleFetchServiceConnected,
   handleLoginOptionList,
 } from "../../../store/actions";
 import { stateType } from "../../../store";
@@ -21,7 +21,7 @@ import { withRouter } from "react-router-dom";
 const mapStateToProps = (state: stateType) => {
   return {
     plugins: state.manager.plugins,
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
     settingDrive: state.manager.settingDrive,
     defaultSyncOption: state.backupPage.defaultSyncOption,
     loginOptionList: state.backupPage.loginOptionList,
@@ -38,7 +38,7 @@ const actionCreator = {
   handleSettingDrive,
   handleFetchLoginOptionList,
   handleLoadingDialog,
-  handleFetchAuthed,
+  handleFetchServiceConnected,
   handleLoginOptionList,
 };
 export default connect(

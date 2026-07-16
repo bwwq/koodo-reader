@@ -5,7 +5,7 @@ export interface PopupTransProps {
   originalText: string;
   plugins: Plugin[];
   currentBook: BookModel;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   handleOpenMenu: (isOpenMenu: boolean) => void;
   handleMenuMode: (menu: string) => void;
   handleFetchPlugins: () => void;

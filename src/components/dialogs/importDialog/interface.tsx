@@ -12,7 +12,7 @@ export interface ImportDialogProps extends RouteComponentProps<any> {
   handleSettingMode: (settingMode: string) => void;
   handleSettingDrive: (settingDrive: string) => void;
   isOpenTokenDialog: boolean;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
 
   dataSourceList: string[];
 }

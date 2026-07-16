@@ -17,7 +17,7 @@ import {
   handleFetchPercentage,
   handleFetchPlugins,
   handleReaderMode,
-  handleFetchAuthed,
+  handleFetchServiceConnected,
   handleScale,
   handleBackgroundColor,
 } from "../../store/actions";
@@ -34,7 +34,7 @@ const mapStateToProps = (state: stateType) => {
     isNavLocked: state.reader.isNavLocked,
     isSettingLocked: state.reader.isSettingLocked,
     isOpenMenu: state.viewArea.isOpenMenu,
-    isAuthed: state.manager.isAuthed,
+    isServiceConnected: state.manager.isServiceConnected,
     readerMode: state.reader.readerMode,
     defaultSyncOption: state.backupPage.defaultSyncOption,
     menuMode: state.viewArea.menuMode,
@@ -62,7 +62,7 @@ const actionCreator = {
   handleMenuMode,
   handleFetchPlugins,
   handleReaderMode,
-  handleFetchAuthed,
+  handleFetchServiceConnected,
   handleScale,
   handleBackgroundColor,
 };

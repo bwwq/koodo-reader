@@ -8,11 +8,12 @@ export interface SettingInfoProps extends RouteComponentProps<any> {
 }
 export interface AIModelConfig {
   endpoint: string;
+  modelsEndpoint?: string;
   modelName: string;
   modelId: string;
-  apiKey: string;
   providerId: string;
   providerName: string;
+  capabilities: ("chat" | "vision" | "tts")[];
 }
 export interface SettingInfoState {
   isAddNew: boolean;
@@ -21,9 +22,11 @@ export interface SettingInfoState {
   selectedProvider: string;
   selectedModel: string;
   endpoint: string;
+  modelsEndpoint: string;
   modelName: string;
   modelId: string;
   apiKey: string;
+  capabilities: ("chat" | "vision" | "tts")[];
   isTesting: boolean;
   testResult: string;
   fetchedModels: { id: string; name: string }[];
@@ -31,6 +34,8 @@ export interface SettingInfoState {
   aiTranslateModel: string;
   aiDictModel: string;
   aiAssistanceModel: string;
+  aiVisionModel: string;
+  aiTtsModel: string;
   aiTranslatePrompt: string;
   aiDictPrompt: string;
   aiAssistancePrompt: string;

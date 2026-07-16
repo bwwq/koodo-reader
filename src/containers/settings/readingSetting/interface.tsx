@@ -3,7 +3,7 @@ export interface SettingInfoProps extends RouteComponentProps<any> {
   handleSetting: (isSettingOpen: boolean) => void;
   handleSettingMode: (settingMode: string) => void;
   t: (title: string) => string;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
 }
 export interface SettingInfoState {
   isTouch: boolean;

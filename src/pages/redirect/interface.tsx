@@ -5,7 +5,7 @@ export interface RedirectProps extends RouteComponentProps<any> {
 }
 
 export interface RedirectState {
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   isError: boolean;
   token: string;
 }

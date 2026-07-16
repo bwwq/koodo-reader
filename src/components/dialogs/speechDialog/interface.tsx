@@ -9,7 +9,7 @@ export interface SpeechDialogProps {
   handleSetting: (isSettingOpen: boolean) => void;
   handleSpeechDialog: (isAboutOpen: boolean) => void;
   handleFetchPlugins: () => void;
-  isAuthed: boolean;
+  isServiceConnected: boolean;
   t: (title: string) => string;
   plugins: Plugin[];
 }

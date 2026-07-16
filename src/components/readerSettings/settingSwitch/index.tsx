@@ -18,7 +18,7 @@ const mapStateToProps = (state: stateType) => {
     renderBookFunc: state.book.renderBookFunc,
     plugins: state.manager.plugins,
     htmlBook: state.reader.htmlBook,
-    isAuthed: state.manager.isAuthed as boolean,
+    isServiceConnected: state.manager.isServiceConnected as boolean,
   };
 };
 const actionCreator = {
