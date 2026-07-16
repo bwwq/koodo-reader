@@ -39,11 +39,11 @@ fun installSandbox() {
     ContextFactory.initGlobal(object : ContextFactory() {
         override fun makeContext(): Context {
             return super.makeContext().apply {
-                classShutter = ClassShutter { name ->
+                setClassShutter(ClassShutter { name ->
                     allowedScriptClasses.any { allowed ->
                         if (allowed.endsWith('.')) name.startsWith(allowed) else name == allowed
                     }
-                }
+                })
                 optimizationLevel = -1
             }
         }

@@ -1,7 +1,6 @@
 package gs.ouo.rd.koodo.legado
 
 import io.legado.app.adapters.ReaderAdapterHelper
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,10 +12,16 @@ class SandboxTest {
         installSandbox()
         val context = Context.enter()
         try {
-            val shutter = context.classShutter
-            assertFalse(shutter.visibleToScripts("java.lang.Runtime"))
-            assertFalse(shutter.visibleToScripts("java.io.File"))
-            assertTrue(shutter.visibleToScripts("io.legado.app.data.entities.Book"))
+            val scope = context.initStandardObjects()
+            assertTrue(runCatching {
+                context.evaluateString(scope, "Packages.java.lang.Runtime.getRuntime()", "blocked", 1, null)
+            }.isFailure)
+            assertTrue(runCatching {
+                context.evaluateString(scope, "Packages.java.io.File", "blocked", 1, null)
+            }.isFailure)
+            assertTrue(runCatching {
+                context.evaluateString(scope, "Packages.io.legado.app.data.entities.Book", "allowed", 1, null)
+            }.isSuccess)
         } finally {
             Context.exit()
         }
