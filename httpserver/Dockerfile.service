@@ -1,0 +1,16 @@
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY service ./service
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/koodo-service ./service
+
+FROM alpine:3.22
+RUN addgroup -S koodo && adduser -S -G koodo koodo && mkdir -p /data && chown -R koodo:koodo /data
+COPY --from=builder /out/koodo-service /usr/local/bin/koodo-service
+USER koodo
+VOLUME ["/data"]
+EXPOSE 8081
+ENV SERVICE_PORT=8081 SERVICE_DB=/data/service.db
+ENTRYPOINT ["/usr/local/bin/koodo-service"]

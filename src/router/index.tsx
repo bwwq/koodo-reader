@@ -10,6 +10,22 @@ import { ConfigService } from "../assets/lib/kookit-extra-browser.min";
 const Router = () => {
   useEffect(() => {
     const lng = ConfigService.getReaderConfig("lang");
+    const chineseDefaultApplied = ConfigService.getItem(
+      "selfHostedChineseDefaultV1"
+    );
+
+    // This self-hosted fork is Chinese-first. Migrate the language that the
+    // previous browser-only build auto-selected as English, while preserving
+    // any language the user chooses afterwards.
+    if (!chineseDefaultApplied && (!lng || lng === "en")) {
+      i18n.changeLanguage("zhCN");
+      ConfigService.setReaderConfig("lang", "zhCN");
+      ConfigService.setItem("selfHostedChineseDefaultV1", "yes");
+      return;
+    }
+    if (!chineseDefaultApplied) {
+      ConfigService.setItem("selfHostedChineseDefaultV1", "yes");
+    }
 
     if (lng) {
       //Compatile with 1.6.0 and older
@@ -136,8 +152,8 @@ const Router = () => {
         i18n.changeLanguage("vi");
         ConfigService.setReaderConfig("lang", "vi");
       } else {
-        i18n.changeLanguage("en");
-        ConfigService.setReaderConfig("lang", "en");
+        i18n.changeLanguage("zhCN");
+        ConfigService.setReaderConfig("lang", "zhCN");
       }
     }
   }, []);

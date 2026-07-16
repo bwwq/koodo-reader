@@ -1,6 +1,6 @@
 # Koodo Reader 自建服务 API v1
 
-客户端只信任访问令牌中的账号身份。除管理员接口外，所有业务接口都必须忽略或拒绝客户端提交的 `user_id`，并从已验证令牌的 `sub` 取得用户 ID。
+仓库中的 `httpserver/service` 已实现账号、管理员、邀请码和隔离同步接口。客户端只信任已验证访问令牌对应的账号身份；普通业务接口不接受 `user_id`，服务端从会话取得用户 ID。
 
 ## 通用响应
 
@@ -13,7 +13,7 @@
 ## 服务与账号
 
 - `GET /v1/health`：`data` 为 `{ "version": "1.0.0", "capabilities": ["sync.data", "storage.oauth"] }`
-- `GET /v1/auth/config`：`data` 为 `{ "registration_mode": "admin" | "invite" }`
+- `GET /v1/auth/config`：`data` 为 `{ "registration_mode": "bootstrap" | "admin" | "invite", "service_name": "Koodo Reader" }`
 - `POST /v1/auth/register`：`{ "username", "password", "invite_code" }`
 - `POST /v1/auth/login`：`{ "username", "password", "device" }`
 - `POST /v1/auth/refresh`：`{ "refresh_token" }`
@@ -27,11 +27,23 @@
   "access_token": "...",
   "refresh_token": "...",
   "expires_in": 900,
-  "user": { "id": "u_123", "username": "alice", "display_name": "Alice" }
+  "user": { "id": "u_123", "username": "alice", "display_name": "Alice", "role": "admin" }
 }
 ```
 
 Access Token 默认 15 分钟；Refresh Token 默认 30 天并在每次刷新时轮换，旧令牌立即失效。邀请码默认只能成功核销一次。用户名限定为 3–32 位字母、数字、点、下划线或连字符；密码长度为 8–128 位。
+
+数据库没有账号时注册模式为 `bootstrap`，第一个成功注册的账号自动成为管理员，且不需要邀请码。之后服务恢复管理员配置的注册模式。
+
+## 管理员接口
+
+以下接口要求当前账号的 `role` 为 `admin`：
+
+- `GET /v1/admin/config`：读取服务名称、注册模式和已实现能力。
+- `PUT /v1/admin/config`：接收 `{ "service_name", "registration_mode": "admin" | "invite" }`。
+- `POST /v1/admin/invites`：接收 `{ "count": 1, "expires_in_days": 7 }`，完整邀请码只在创建响应中返回一次。
+- `GET /v1/admin/invites`：查看邀请码提示、状态和有效期，不返回完整邀请码。
+- `GET /v1/admin/users`：查看已注册账号及角色。
 
 ## 数据隔离与同步
 

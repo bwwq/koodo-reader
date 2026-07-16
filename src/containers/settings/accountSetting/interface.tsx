@@ -16,10 +16,15 @@ export interface SettingInfoState {
   password: string;
   confirmPassword: string;
   inviteCode: string;
-  registrationMode: "admin" | "invite";
+  registrationMode: "bootstrap" | "admin" | "invite";
   isRegistering: boolean;
   isLoading: boolean;
   serviceVersion: string;
   capabilities: string[];
   healthMessage: string;
+  adminRegistrationMode: "admin" | "invite";
+  serviceName: string;
+  inviteDays: string;
+  generatedInvites: string[];
+  adminUsers: ServiceUser[];
 }

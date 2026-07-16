@@ -27,6 +27,7 @@ export interface ServiceUser {
   id: string;
   username: string;
   displayName?: string;
+  role?: "admin" | "user";
 }
 
 export interface ServiceHealth {
@@ -35,7 +36,21 @@ export interface ServiceHealth {
 }
 
 export interface AuthConfig {
+  registration_mode: "bootstrap" | "admin" | "invite";
+  service_name?: string;
+}
+
+export interface AdminConfig {
   registration_mode: "admin" | "invite";
+  service_name: string;
+  capabilities: ServiceCapability[];
+}
+
+export interface AdminInvite {
+  code_hint: string;
+  created_at: number;
+  expires_at: number;
+  status: "available" | "used" | "expired" | "revoked";
 }
 
 interface TokenPayload {
@@ -47,6 +62,7 @@ interface TokenPayload {
     username: string;
     display_name?: string;
     displayName?: string;
+    role?: "admin" | "user";
   };
 }
 
@@ -105,6 +121,7 @@ const normalizeUser = (user: TokenPayload["user"]): ServiceUser | null => {
     id: String(user.id),
     username: user.username,
     displayName: user.displayName || user.display_name || "",
+    role: user.role,
   };
 };
 
@@ -431,3 +448,33 @@ export const logoutServiceAccount = async () => {
   });
   await clearServiceSession();
 };
+
+export const getAdminConfig = () =>
+  serviceRequest<AdminConfig>("/v1/admin/config", { method: "GET" });
+
+export const updateAdminConfig = (config: {
+  registration_mode: "admin" | "invite";
+  service_name: string;
+}) =>
+  serviceRequest<AdminConfig>("/v1/admin/config", {
+    method: "PUT",
+    body: JSON.stringify(config),
+  });
+
+export const createAdminInvites = (config: {
+  count: number;
+  expires_in_days: number;
+}) =>
+  serviceRequest<{ codes: string[]; expires_at: number }>(
+    "/v1/admin/invites",
+    {
+      method: "POST",
+      body: JSON.stringify(config),
+    }
+  );
+
+export const getAdminInvites = () =>
+  serviceRequest<AdminInvite[]>("/v1/admin/invites", { method: "GET" });
+
+export const getAdminUsers = () =>
+  serviceRequest<ServiceUser[]>("/v1/admin/users", { method: "GET" });
