@@ -44,7 +44,9 @@ fun installSandbox() {
     }
     ContextFactory.getGlobal().addListener(object : ContextFactory.Listener {
         override fun contextCreated(context: Context) {
-            context.setClassShutter(shutter)
+            val shutterField = Context::class.java.getDeclaredField("classShutter")
+            shutterField.isAccessible = true
+            shutterField.set(context, shutter)
             context.optimizationLevel = -1
         }
 
