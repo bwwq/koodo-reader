@@ -105,11 +105,25 @@ private val dangerousScript = Regex(
         "unzipFile\\s*\\(|getTxtInFolder\\s*\\(|downloadFile\\s*\\()"
 )
 
-private fun validateSource(raw: String): BookSource {
+internal fun validateSource(raw: String): BookSource {
     if (dangerousScript.containsMatchIn(raw)) {
         throw IllegalArgumentException("source contains forbidden JVM access")
     }
-    val source = BookSource.fromJson(raw).getOrElse {
+    // reader-legado's migration path uses ruleToc as the discriminator between
+    // legacy and modern JSON. Search-only modern sources legitimately omit it,
+    // so add an empty rule object before delegating to the upstream parser.
+    val sourceJson = runCatching { gson.fromJson(raw, JsonObject::class.java) }
+        .getOrNull()
+        ?.also { root ->
+            val modern = listOf("searchUrl", "ruleSearch", "ruleBookInfo", "ruleContent")
+                .any(root::has)
+            if (modern && (!root.has("ruleToc") || root.get("ruleToc").isJsonNull)) {
+                root.add("ruleToc", JsonObject())
+            }
+        }
+        ?.let { gson.toJson(it) }
+        ?: raw
+    val source = BookSource.fromJson(sourceJson).getOrElse {
         throw IllegalArgumentException("invalid Legado source: ${it.message}")
     }
     if (source.bookSourceUrl.isBlank() || source.bookSourceName.isBlank()) {

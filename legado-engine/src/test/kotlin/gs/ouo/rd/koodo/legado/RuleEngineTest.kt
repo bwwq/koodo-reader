@@ -12,6 +12,28 @@ import java.net.InetSocketAddress
 
 class RuleEngineTest {
     @Test
+    fun parsesModernSearchOnlySourceJson() {
+        val source = validateSource(
+            """
+            {
+              "bookSourceUrl": "https://books.example",
+              "bookSourceName": "Search-only source",
+              "searchUrl": "https://books.example/search?q={{key}}",
+              "ruleSearch": {
+                "bookList": ".book",
+                "name": "h2@text",
+                "bookUrl": "a@href"
+              }
+            }
+            """.trimIndent()
+        )
+
+        assertEquals("https://books.example/search?q={{key}}", source.searchUrl)
+        assertEquals(".book", source.ruleSearch?.bookList)
+        assertEquals("h2@text", source.ruleSearch?.name)
+    }
+
+    @Test
     fun searchesCssRulesWithKeywordPageAndHeaders() {
         installSandbox()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
