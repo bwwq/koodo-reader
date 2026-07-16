@@ -37,11 +37,26 @@ import {
   onSyncCallback,
 } from "../../../utils/request/thirdparty";
 import SyncService from "../../../utils/storage/syncService";
-import { bindSyncToCurrentUser } from "../../../utils/request/service";
+import {
+  bindSyncToCurrentUser,
+  hasServiceCapability,
+} from "../../../utils/request/service";
 import BookUtil from "../../../utils/file/bookUtil";
 import Book from "../../../models/Book";
 import ConfigUtil from "../../../utils/file/configUtil";
 declare var window: any;
+const oauthDrives = new Set([
+  "dropbox",
+  "yandex",
+  "dubox",
+  "yiyiwu",
+  "google",
+  "boxnet",
+  "pcloud",
+  "adrive",
+  "microsoft_exp",
+  "microsoft",
+]);
 class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
   constructor(props: SettingInfoProps) {
     super(props);
@@ -60,7 +75,14 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
       backupDrive: "",
       restoreDrive: "",
       showDefaultSyncAddGrid: false,
+      hasOAuthStorage: false,
     };
+  }
+
+  async componentDidMount() {
+    this.setState({
+      hasOAuthStorage: await hasServiceCapability("storage.oauth"),
+    });
   }
 
   handleRest = (_bool: boolean) => {
@@ -128,6 +150,14 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
       }
     }
     this.props.handleSettingDrive(targetDrive);
+    if (targetDrive === "docker") {
+      this.setState({
+        driveConfig: {
+          url: ConfigService.getItem("serviceBaseUrl") || "",
+          username: this.props.serviceUser?.username || "",
+        },
+      });
+    }
     let settingDrive = targetDrive;
     if (settingDrive === "icloud" || settingDrive === "folder") {
       let drivePath = "";
@@ -598,6 +628,10 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
           >
             {driveList
               .filter((item) => !this.props.dataSourceList.includes(item.value))
+              .filter(
+                (item) =>
+                  this.state.hasOAuthStorage || !oauthDrives.has(item.value)
+              )
               .filter((item) => {
                 if (!isElectron) {
                   return item.support.includes("browser");
@@ -652,6 +686,7 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
                         type={item.type}
                         name={item.value}
                         key={item.value}
+                        defaultValue={this.state.driveConfig[item.value] || ""}
                         placeholder={
                           this.props.t(item.label) +
                           (item.required
@@ -773,7 +808,7 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
                 }}
               >
                 {this.props.t(
-                  "The Koodo Reader Docker version does not support the data source feature by default. You need to modify the configuration parameters during deployment to manually enable it. Also due to browser's security restrictions, the Docker service must be accessed via HTTPS protocol when you're visiting Koodo Reader via HTTPS protocol."
+                  "Use the online service address and your account credentials. Files are isolated by account. HTTPS is required when the web app is opened over HTTPS."
                 )}
               </div>
             )}
@@ -946,14 +981,12 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
               {
                 label: "Please select",
                 value: "",
-                isPro: false,
                 support: ["desktop", "browser", "phone"],
               },
               ...driveList,
               {
                 label: "Add data source",
                 value: "add",
-                isPro: false,
                 support: ["desktop", "browser", "phone"],
               },
             ]
@@ -1004,7 +1037,7 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
             className="lang-setting-dropdown"
             onChange={this.handleDeleteDataSource}
           >
-            {[{ label: "Please select", value: "", isPro: false }, ...driveList]
+            {[{ label: "Please select", value: "" }, ...driveList]
               .filter(
                 (item) =>
                   this.props.dataSourceList.includes(item.value) ||
@@ -1035,9 +1068,9 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
               {this.props.t("Please select")}
             </option>
             {[
-              { label: "Local", value: "local", isPro: false },
+              { label: "Local", value: "local" },
               ...driveList,
-              { label: "Add data source", value: "add", isPro: false },
+              { label: "Add data source", value: "add" },
             ]
               .filter(
                 (item) =>
@@ -1070,9 +1103,9 @@ class SyncSetting extends React.Component<SettingInfoProps, SettingInfoState> {
               {this.props.t("Please select")}
             </option>
             {[
-              { label: "Local", value: "local", isPro: false },
+              { label: "Local", value: "local" },
               ...driveList,
-              { label: "Add data source", value: "add", isPro: false },
+              { label: "Add data source", value: "add" },
             ]
               .filter(
                 (item) =>

@@ -53,8 +53,10 @@ def login(username, password):
 
 def main():
     health = api("GET", "/v1/health")
-    assert health["version"] == "0.2.0"
-    assert {"sync.data", "sync.koreader"}.issubset(health["capabilities"])
+    assert health["version"] == "0.3.0"
+    assert {"sync.data", "sync.koreader", "storage.files"}.issubset(
+        health["capabilities"]
+    )
 
     config = api("GET", "/v1/auth/config")
     assert config["registration_mode"] == "bootstrap"

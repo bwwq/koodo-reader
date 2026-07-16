@@ -75,6 +75,12 @@ const newest = (a: SyncEnvelope, b: SyncEnvelope): SyncEnvelope => {
   return a.version >= b.version ? a : b;
 };
 
+const ensureProviderWrite = (result: any) => {
+  if (result === false || result?.success === false) {
+    throw new Error("The selected data source rejected the upload");
+  }
+};
+
 class ConfigUtil {
   public static syncData: any = {};
   public static updateData: any = {};
@@ -112,7 +118,7 @@ class ConfigUtil {
       });
       if (!result) {
         console.error("no config file");
-        return "{}";
+        return undefined;
       }
       let fs = window.require("fs");
       if (!fs.existsSync(getStorageLocation() + "/config/" + type + ".json")) {
@@ -130,7 +136,7 @@ class ConfigUtil {
         "config"
       );
       if (!jsonBuffer) {
-        return "{}";
+        return undefined;
       }
       let jsonStr = new TextDecoder().decode(jsonBuffer);
       return jsonStr;
@@ -169,19 +175,22 @@ class ConfigUtil {
           JSON.stringify(envelope)
         );
 
-        await ipcRenderer.invoke("cloud-upload", {
+        const result = await ipcRenderer.invoke("cloud-upload", {
           ...tokenConfig,
           fileName: type + ".json",
           service,
           type: "config",
           storagePath: getStorageLocation(),
         });
+        ensureProviderWrite(result);
       } else {
         let syncUtil = await SyncService.getSyncUtil();
         let configBlob = new Blob([JSON.stringify(envelope)], {
           type: "application/json",
         });
-        await syncUtil.uploadFile(type + ".json", "config", configBlob);
+        ensureProviderWrite(
+          await syncUtil.uploadFile(type + ".json", "config", configBlob)
+        );
       }
     } catch (error) {
       this.recordProviderWriteError(error);
@@ -252,6 +261,7 @@ class ConfigUtil {
       ConfigUtil.downloadConfig(type).catch(() => undefined),
       getOnlineSyncItem(type),
     ]);
+    const providerAvailable = typeof providerRaw === "string";
     const provider = parseEnvelope(providerRaw, "{}");
     const service = fromOnlineItem(
       online.code === 200 ? online.data : undefined,
@@ -265,6 +275,7 @@ class ConfigUtil {
       this.updateVersions[type] = this.onlineVersions[type];
     } else if (
       service.updated_at > provider.updated_at &&
+      providerAvailable &&
       ConfigService.getItem("defaultSyncOption")
     ) {
       this.providerMirrorTypes.add(type);
@@ -278,7 +289,7 @@ class ConfigUtil {
   }
 
   static async getCloudDatabase(database: string) {
-    const loadProvider = async (): Promise<SyncEnvelope> => {
+    const loadProvider = async (): Promise<SyncEnvelope | null> => {
       const service = ConfigService.getItem("defaultSyncOption");
       if (!service) return makeEnvelope("[]", 0);
       if (isElectron) {
@@ -292,7 +303,7 @@ class ConfigUtil {
           isTemp: true,
           storagePath: getStorageLocation(),
         });
-        if (!result) return makeEnvelope("[]", 0);
+        if (!result) return null;
         const records = await DatabaseService.getAllRecords("temp-" + database);
         await ipcRenderer.invoke("close-database", {
           dbName: "temp-" + database,
@@ -331,7 +342,7 @@ class ConfigUtil {
         syncUtil.downloadFile(database + ".db", "config"),
         syncUtil.downloadFile(database + ".meta.json", "config"),
       ]);
-      if (!dbBuffer) return makeEnvelope("[]", 0);
+      if (!dbBuffer) return null;
       const records = await new SqlUtil().dbBufferToJson(dbBuffer, database);
       let meta: any = {};
       try {
@@ -349,23 +360,24 @@ class ConfigUtil {
       };
     };
     const [provider, online] = await Promise.all([
-      loadProvider().catch(() => makeEnvelope("[]", 0)),
+      loadProvider().catch(() => null),
       getOnlineSyncItem(database),
     ]);
     this.onlineVersions[database] =
       online.code === 200 ? Number(online.data.version) || 0 : 0;
     const selected = newest(
-      provider,
+      provider || makeEnvelope("[]", 0),
       fromOnlineItem(online.code === 200 ? online.data : undefined, "[]")
     );
     const service = fromOnlineItem(
       online.code === 200 ? online.data : undefined,
       "[]"
     );
-    if (provider.updated_at > service.updated_at) {
+    if (provider && provider.updated_at > service.updated_at) {
       this.updateData[database] = provider.content;
       this.updateVersions[database] = this.onlineVersions[database];
     } else if (
+      provider !== null &&
       service.updated_at > provider.updated_at &&
       ConfigService.getItem("defaultSyncOption")
     ) {
@@ -406,31 +418,37 @@ class ConfigUtil {
           configPath + "/" + type + ".meta.json",
           JSON.stringify(meta)
         );
-        await ipcRenderer.invoke("cloud-upload", {
+        const dbResult = await ipcRenderer.invoke("cloud-upload", {
           ...tokenConfig,
           fileName: type + ".db",
           service,
           type: "config",
           storagePath: getStorageLocation(),
         });
-        await ipcRenderer.invoke("cloud-upload", {
+        ensureProviderWrite(dbResult);
+        const metaResult = await ipcRenderer.invoke("cloud-upload", {
           ...tokenConfig,
           fileName: type + ".meta.json",
           service,
           type: "config",
           storagePath: getStorageLocation(),
         });
+        ensureProviderWrite(metaResult);
       } else {
         let dbBuffer = await DatabaseService.getDbBuffer(type);
         let dbBlob = new Blob([dbBuffer], {
           type: CommonTool.getMimeType("db"),
         });
         let syncUtil = await SyncService.getSyncUtil();
-        await syncUtil.uploadFile(type + ".db", "config", dbBlob);
-        await syncUtil.uploadFile(
-          type + ".meta.json",
-          "config",
-          new Blob([JSON.stringify(meta)], { type: "application/json" })
+        ensureProviderWrite(
+          await syncUtil.uploadFile(type + ".db", "config", dbBlob)
+        );
+        ensureProviderWrite(
+          await syncUtil.uploadFile(
+            type + ".meta.json",
+            "config",
+            new Blob([JSON.stringify(meta)], { type: "application/json" })
+          )
         );
       }
     } catch (error) {

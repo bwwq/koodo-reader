@@ -12,7 +12,7 @@
 
 ## 服务与账号
 
-- `GET /v1/health`：`data` 为 `{ "version": "0.2.0", "capabilities": ["sync.data", "sync.koreader"] }`
+- `GET /v1/health`：`data` 为 `{ "version": "0.3.0", "capabilities": ["sync.data", "sync.koreader", "storage.files"] }`
 - `GET /v1/auth/config`：`data` 为 `{ "registration_mode": "bootstrap" | "admin" | "invite", "service_name": "Koodo Reader" }`
 - `POST /v1/auth/register`：`{ "username", "password", "invite_code" }`
 - `POST /v1/auth/login`：`{ "username", "password", "device" }`
@@ -40,10 +40,11 @@ Access Token 默认 15 分钟；Refresh Token 默认 30 天并在每次刷新时
 以下接口要求当前账号的 `role` 为 `admin`：
 
 - `GET /v1/admin/config`：读取服务名称、注册模式和已实现能力。
-- `PUT /v1/admin/config`：接收 `{ "service_name", "registration_mode": "admin" | "invite" }`。
+- `PUT /v1/admin/config`：接收 `{ "service_name", "registration_mode": "admin" | "invite", "koreader_registration_enabled": true }`。
 - `POST /v1/admin/invites`：接收 `{ "count": 1, "expires_in_days": 7 }`，完整邀请码只在创建响应中返回一次。
 - `GET /v1/admin/invites`：查看邀请码提示、状态和有效期，不返回完整邀请码。
 - `GET /v1/admin/users`：查看已注册账号及角色。
+- `POST /v1/admin/users`：管理员直接创建普通账号，接收 `{ "username", "password", "display_name" }`，不消耗邀请码。
 
 ## 数据隔离与同步
 
@@ -83,9 +84,22 @@ CREATE TABLE sync_items (
 - `GET /syncs/progress/{document}`
 - `GET /healthcheck`
 
-KOReader 接口使用 `x-auth-user` 与 `x-auth-key` 请求头。KOReader 账号及进度与普通在线服务会话分开保存，进度以 `(username, document)` 隔离。设置 `ENABLE_KOREADER_REGISTRATION=false` 可关闭公开创建 KOReader 账号。
+KOReader 接口使用 `x-auth-user` 与 `x-auth-key` 请求头。KOReader 账号及进度与普通在线服务会话分开保存，进度以 `(username, document)` 隔离。管理员可在客户端服务设置中开关公开注册；`ENABLE_KOREADER_REGISTRATION=false` 仅决定新数据库的默认值。
 
-跨域请求默认只允许与请求 Host 相同的来源；额外受信任来源通过逗号分隔的 `SERVICE_ALLOWED_ORIGINS` 配置。
+跨域请求默认只允许与请求 Host、协议均相同的来源；额外受信任来源通过逗号分隔的 `SERVICE_ALLOWED_ORIGINS` 配置。Capacitor 客户端使用的 `https://localhost` 与 `capacitor://localhost` 默认允许。
+
+登录、注册、刷新令牌和 KOReader 账号接口按来源 IP 限速。普通 JSON 请求体默认最大 20 MiB，可通过 `SERVICE_MAX_BODY_BYTES` 调整。
+
+## 账号隔离文件存储
+
+服务以 `storage.files` 声明文件存储能力，可直接作为客户端的“Docker”数据源。文件接口使用在线服务账号的用户名和密码进行 HTTP Basic Auth，文件实际保存在 `SERVICE_FILES_DIR/<user_id>`，不同账号即使使用相同文件名也不会互相读取或覆盖。
+
+- `POST /upload?dir=book`：`multipart/form-data` 上传文件。
+- `GET /download?dir=book&filename=example.epub`
+- `DELETE /delete?dir=book&filename=example.epub`
+- `GET /list?dir=book`
+
+文件请求默认最大 512 MiB，可通过 `SERVICE_FILE_MAX_BYTES` 调整。反向代理也必须代理上述四个路径并允许相同或更大的请求体。
 
 ## 独立 API 测试
 
@@ -104,7 +118,9 @@ python3 service/smoke_test.py http://127.0.0.1:18082
 
 建议让临时容器只监听回环地址，并使用独立的 `/data/test.db`；测试结束后删除临时容器和数据库。
 
-## 云存储 OAuth
+## 预留：云存储 OAuth
+
+当前仓库后端尚未实现以下接口，且不会声明 `storage.oauth`。客户端只有在服务端声明该能力时才显示新的 OAuth 数据源入口。
 
 - `POST /v1/storage/oauth/authorize`：接收 `{ "provider", "redirect_uri" }`，`data` 返回 `{ "authorization_url", "state" }`
 - `POST /v1/storage/oauth/exchange`：接收 `{ "provider", "code", "redirect_uri" }`
@@ -112,7 +128,9 @@ python3 service/smoke_test.py http://127.0.0.1:18082
 
 OAuth state、回调及一次性交换码必须绑定当前用户、提供商和回调地址，并设置短时有效期。返回的提供商令牌由客户端本地保存。
 
-## 可选阅读能力
+## 预留：可选阅读能力
+
+当前仓库后端尚未实现以下接口，也不会声明对应的 `reader.*` 能力。客户端会回退到用户配置的 OpenAI 兼容模型。
 
 服务通过 `/v1/health` 的 `capabilities` 声明已实现能力：
 

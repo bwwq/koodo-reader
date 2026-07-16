@@ -1279,7 +1279,7 @@ class TextToSpeech extends React.Component<
                   value="official-ai-voice-plugin"
                   className="lang-setting-option"
                 >
-                  {this.props.t("Official AI Voice")}
+                  {this.props.t("AI model voice")}
                 </option>
                 <option value="custom" className="lang-setting-option">
                   {this.props.t("Custom voice")}

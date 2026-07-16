@@ -27,4 +27,8 @@ export interface SettingInfoState {
   inviteDays: string;
   generatedInvites: string[];
   adminUsers: ServiceUser[];
+  adminNewUsername: string;
+  adminNewPassword: string;
+  adminNewDisplayName: string;
+  koreaderRegistrationEnabled: boolean;
 }

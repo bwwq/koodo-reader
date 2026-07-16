@@ -40,4 +40,5 @@ export interface SettingInfoState {
   backupDrive: string;
   restoreDrive: string;
   showDefaultSyncAddGrid: boolean;
+  hasOAuthStorage: boolean;
 }

@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +23,9 @@ func openTestDatabase(t *testing.T) {
 	if err = openDatabase(); err != nil {
 		t.Fatal(err)
 	}
+	rateMu.Lock()
+	rateBuckets = map[string]*rateBucket{}
+	rateMu.Unlock()
 	t.Cleanup(func() { _ = db.Close() })
 }
 
@@ -126,6 +131,26 @@ func TestCORSOnlyAllowsSameHostOrConfiguredOrigin(t *testing.T) {
 	if got := sameRes.Header().Get("Access-Control-Allow-Origin"); got != "https://rd.ouo.gs" {
 		t.Fatalf("same origin not allowed: %q", got)
 	}
+
+	crossScheme := httptest.NewRequest(http.MethodGet, "https://rd.ouo.gs/v1/health", nil)
+	crossScheme.Host = "rd.ouo.gs"
+	crossScheme.Header.Set("X-Forwarded-Proto", "https")
+	crossScheme.Header.Set("Origin", "http://rd.ouo.gs")
+	crossSchemeRes := httptest.NewRecorder()
+	route(crossSchemeRes, crossScheme)
+	if got := crossSchemeRes.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("cross-scheme origin unexpectedly allowed: %q", got)
+	}
+
+	mobile := httptest.NewRequest(http.MethodOptions, "https://rd.ouo.gs/v1/auth/login", nil)
+	mobile.Host = "rd.ouo.gs"
+	mobile.Header.Set("X-Forwarded-Proto", "https")
+	mobile.Header.Set("Origin", "https://localhost")
+	mobileRes := httptest.NewRecorder()
+	route(mobileRes, mobile)
+	if got := mobileRes.Header().Get("Access-Control-Allow-Origin"); got != "https://localhost" {
+		t.Fatalf("Capacitor origin not allowed: %q", got)
+	}
 }
 
 func TestAuthenticationAndAdminLifecycle(t *testing.T) {
@@ -147,6 +172,15 @@ func TestAuthenticationAndAdminLifecycle(t *testing.T) {
 	me := request(t, http.MethodGet, "/v1/auth/me", nil, bearer(access))
 	if me.Code != http.StatusOK || responseDataMap(t, me)["role"] != "admin" {
 		t.Fatalf("admin identity unavailable: %d %s", me.Code, me.Body.String())
+	}
+	createdUser := request(t, http.MethodPost, "/v1/admin/users", map[string]string{
+		"username": "admin-created", "password": "password-456", "display_name": "Created User",
+	}, bearer(access))
+	if createdUser.Code != http.StatusOK || responseDataMap(t, createdUser)["role"] != "user" {
+		t.Fatalf("admin could not create account: %d %s", createdUser.Code, createdUser.Body.String())
+	}
+	if session := loginAccount(t, "admin-created", "password-456"); session["access_token"] == "" {
+		t.Fatal("admin-created account could not log in")
 	}
 
 	updated := request(t, http.MethodPut, "/v1/admin/config", map[string]string{
@@ -181,6 +215,24 @@ func TestAuthenticationAndAdminLifecycle(t *testing.T) {
 	}
 }
 
+func TestAuthenticationRoutesAreRateLimited(t *testing.T) {
+	openTestDatabase(t)
+	for i := 0; i < 20; i++ {
+		res := request(t, http.MethodPost, "/v1/auth/login", map[string]string{
+			"username": "missing-user", "password": "password-123",
+		}, nil)
+		if res.Code == http.StatusTooManyRequests {
+			t.Fatalf("rate limit activated too early at request %d", i+1)
+		}
+	}
+	limited := request(t, http.MethodPost, "/v1/auth/login", map[string]string{
+		"username": "missing-user", "password": "password-123",
+	}, nil)
+	if limited.Code != http.StatusTooManyRequests {
+		t.Fatalf("rate limit was not enforced: %d %s", limited.Code, limited.Body.String())
+	}
+}
+
 func TestSyncDataIsIsolatedAndVersioned(t *testing.T) {
 	openTestDatabase(t)
 	if res := registerAccount(t, "sync-admin", "password-123", ""); res.Code != http.StatusOK {
@@ -206,13 +258,21 @@ func TestSyncDataIsIsolatedAndVersioned(t *testing.T) {
 		session := loginAccount(t, account.username, "password-123")
 		tokens[account.username] = session["access_token"].(string)
 		res := request(t, http.MethodPut, "/v1/sync", map[string]any{
-			"items": map[string]string{"notes": account.content},
+			"items":    map[string]string{"notes": account.content},
 			"versions": map[string]int64{"notes": 0},
-			"user_id": "must-be-ignored",
+			"user_id":  "must-be-ignored",
 		}, bearer(tokens[account.username]))
 		if res.Code != http.StatusOK {
 			t.Fatalf("save %s: %d %s", account.username, res.Code, res.Body.String())
 		}
+	}
+	largePayload := strings.Repeat("x", 2<<20)
+	large := request(t, http.MethodPut, "/v1/sync", map[string]any{
+		"items":    map[string]string{"books": largePayload},
+		"versions": map[string]int64{"books": 0},
+	}, bearer(tokens[accounts[0].username]))
+	if large.Code != http.StatusOK {
+		t.Fatalf("sync payload above legacy 1 MiB limit failed: %d %s", large.Code, large.Body.String())
 	}
 
 	for _, account := range accounts {
@@ -227,7 +287,7 @@ func TestSyncDataIsIsolatedAndVersioned(t *testing.T) {
 	}
 
 	conflict := request(t, http.MethodPut, "/v1/sync", map[string]any{
-		"items": map[string]string{"notes": "stale"},
+		"items":    map[string]string{"notes": "stale"},
 		"versions": map[string]int64{"notes": 0},
 	}, bearer(tokens[accounts[0].username]))
 	if conflict.Code != http.StatusConflict {
@@ -321,5 +381,70 @@ func TestKoreaderProgressIsIsolatedByAccount(t *testing.T) {
 		if data["progress"] != item.progress {
 			t.Fatalf("%s read another account's progress: %#v", item.name, data)
 		}
+	}
+}
+
+func uploadStorageFile(t *testing.T, username, password, content string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "same-book.epub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/upload?dir=book", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.SetBasicAuth(username, password)
+	res := httptest.NewRecorder()
+	route(res, req)
+	return res
+}
+
+func downloadStorageFile(t *testing.T, username, password string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/download?dir=book&filename=same-book.epub", nil)
+	req.SetBasicAuth(username, password)
+	res := httptest.NewRecorder()
+	route(res, req)
+	return res
+}
+
+func TestFileStorageUsesServiceAccountsAndIsIsolated(t *testing.T) {
+	openTestDatabase(t)
+	t.Setenv("SERVICE_FILES_DIR", filepath.Join(t.TempDir(), "files"))
+	if res := registerAccount(t, "files-admin", "password-123", ""); res.Code != http.StatusOK {
+		t.Fatalf("bootstrap admin: %d %s", res.Code, res.Body.String())
+	}
+	admin := loginAccount(t, "files-admin", "password-123")
+	created := request(t, http.MethodPost, "/v1/admin/users", map[string]string{
+		"username": "files-user", "password": "password-456",
+	}, bearer(admin["access_token"].(string)))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create file user: %d %s", created.Code, created.Body.String())
+	}
+
+	if res := uploadStorageFile(t, "files-admin", "password-123", "admin-content"); res.Code != http.StatusOK {
+		t.Fatalf("admin upload: %d %s", res.Code, res.Body.String())
+	}
+	if res := uploadStorageFile(t, "files-user", "password-456", "user-content"); res.Code != http.StatusOK {
+		t.Fatalf("user upload: %d %s", res.Code, res.Body.String())
+	}
+	adminFile := downloadStorageFile(t, "files-admin", "password-123")
+	userFile := downloadStorageFile(t, "files-user", "password-456")
+	if adminFile.Code != http.StatusOK || adminFile.Body.String() != "admin-content" {
+		t.Fatalf("admin file mismatch: %d %q", adminFile.Code, adminFile.Body.String())
+	}
+	if userFile.Code != http.StatusOK || userFile.Body.String() != "user-content" {
+		t.Fatalf("user file mismatch: %d %q", userFile.Code, userFile.Body.String())
+	}
+	wrongPassword := downloadStorageFile(t, "files-user", "wrong-password")
+	if wrongPassword.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong password accessed storage: %d", wrongPassword.Code)
 	}
 }

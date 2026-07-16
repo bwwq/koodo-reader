@@ -1656,30 +1656,22 @@ export const prepareThirdConfig = async (service: string, config: any) => {
     let refreshToken = config.refresh_token;
     let res = await refreshThirdToken(service, refreshToken);
     if (!res.data || !res.data.access_token) {
+      ConfigService.setItem(service + "_needsReconnect", "yes");
+      SyncService.removeSyncUtil(service);
       toast.error(
-        i18n.t(
-          "The authentication token for your data source is no longer valid, please reauthorize in the settings"
-        ),
+        res.code === 410
+          ? i18n.t("This data source needs to be reconnected")
+          : i18n.t(
+              "The authentication token for your data source is no longer valid, please reauthorize in the settings"
+            ),
         {
           id: "syncing",
           duration: 6000,
         }
       );
-      let targetDrive = service;
-      await TokenService.setToken(targetDrive + "_token", "");
-      SyncService.removeSyncUtil(targetDrive);
-      removeCloudConfig(targetDrive);
-      if (isElectron) {
-        const { ipcRenderer } = window.require("electron");
-        await ipcRenderer.invoke("cloud-close", {
-          service: targetDrive,
-        });
-      }
-      ConfigService.deleteListConfig(targetDrive, "dataSourceList");
-      if (targetDrive === ConfigService.getItem("defaultSyncOption")) {
-        ConfigService.removeItem("defaultSyncOption");
-      }
-      reloadManager();
+      // Preserve the encrypted token and data-source selection. A missing
+      // optional OAuth capability or a temporary refresh failure must never
+      // silently delete the user's configuration.
       return {};
     }
     if (

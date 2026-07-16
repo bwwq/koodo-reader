@@ -146,6 +146,8 @@ export const authThirdToken = async (
   code: string,
   redirectUri: string
 ): Promise<ApiResponse<OAuthToken>> => {
+  const available = await checkOnlineCapability<OAuthToken>("storage.oauth");
+  if (available.code !== 200) return available;
   const response = await serviceRequest<OAuthToken>(
     "/v1/storage/oauth/exchange",
     {
@@ -169,6 +171,8 @@ export const refreshThirdToken = async (
   provider: string,
   refresh_token: string
 ): Promise<ApiResponse<OAuthToken>> => {
+  const available = await checkOnlineCapability<OAuthToken>("storage.oauth");
+  if (available.code !== 200) return available;
   const response = await serviceRequest<OAuthToken>(
     "/v1/storage/oauth/refresh",
     {

@@ -1248,5 +1248,15 @@
   "Registered accounts": "Registered accounts",
   "Create first administrator": "Create first administrator",
   "Create administrator": "Create administrator",
-  "The first registered account becomes the administrator and can configure this service.": "The first registered account becomes the administrator and can configure this service."
+  "The first registered account becomes the administrator and can configure this service.": "The first registered account becomes the administrator and can configure this service.",
+  "Display name": "Display name",
+  "Temporary password": "Temporary password",
+  "Creates a normal user without an invitation code": "Creates a normal user without an invitation code",
+  "Account created": "Account created",
+  "Failed to create account": "Failed to create account",
+  "Audio response received": "Audio response received",
+  "KOReader public registration": "KOReader public registration",
+  "Use the online service address and your account credentials. Files are isolated by account. HTTPS is required when the web app is opened over HTTPS.": "Use the online service address and your account credentials. Files are isolated by account. HTTPS is required when the web app is opened over HTTPS.",
+  "AI vision OCR": "AI vision OCR",
+  "AI model voice": "AI model voice"
 }

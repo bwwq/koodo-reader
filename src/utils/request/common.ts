@@ -72,11 +72,16 @@ export const chatStream = async (
 ) => {
   return new Promise<{ done: boolean }>((resolve, reject) => {
     const messages = [...chat, { role: "user", content: prompt }].slice(-5);
-    const source = new SSE(url + "/chat/completions", {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + apiKey,
-      },
+    const endpoint = url.replace(/\/+$/, "");
+    const chatUrl = endpoint.endsWith("/chat/completions")
+      ? endpoint
+      : endpoint + "/chat/completions";
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (apiKey) headers.Authorization = "Bearer " + apiKey;
+    const source = new SSE(chatUrl, {
+      headers,
       payload: JSON.stringify({
         model,
         messages,

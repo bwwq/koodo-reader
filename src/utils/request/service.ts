@@ -16,6 +16,7 @@ export type ServiceCapability =
   | "reader.language-detect"
   | "sync.data"
   | "sync.koreader"
+  | "storage.files"
   | "storage.oauth";
 
 export interface ApiResponse<T> {
@@ -45,6 +46,7 @@ export interface AdminConfig {
   registration_mode: "admin" | "invite";
   service_name: string;
   capabilities: ServiceCapability[];
+  koreader_registration_enabled: boolean;
 }
 
 export interface AdminInvite {
@@ -339,11 +341,16 @@ export const serviceStream = async (
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let doneReceived = false;
       const emitEvent = (event: string) => {
         for (const line of event.split(/\r?\n/)) {
           if (!line.startsWith("data:")) continue;
           const data = line.slice(5).trim();
-          if (data && data !== "[DONE]") onMessage(data);
+          if (data === "[DONE]") {
+            doneReceived = true;
+            continue;
+          }
+          if (data) onMessage(data);
         }
       };
       while (true) {
@@ -353,6 +360,10 @@ export const serviceStream = async (
         buffer = events.pop() || "";
         for (const event of events) {
           emitEvent(event);
+        }
+        if (doneReceived) {
+          await reader.cancel();
+          break;
         }
         if (done) {
           if (buffer.trim()) emitEvent(buffer);
@@ -456,6 +467,7 @@ export const getAdminConfig = () =>
 export const updateAdminConfig = (config: {
   registration_mode: "admin" | "invite";
   service_name: string;
+  koreader_registration_enabled: boolean;
 }) =>
   serviceRequest<AdminConfig>("/v1/admin/config", {
     method: "PUT",
@@ -479,3 +491,13 @@ export const getAdminInvites = () =>
 
 export const getAdminUsers = () =>
   serviceRequest<ServiceUser[]>("/v1/admin/users", { method: "GET" });
+
+export const createAdminUser = (config: {
+  username: string;
+  password: string;
+  display_name?: string;
+}) =>
+  serviceRequest<ServiceUser>("/v1/admin/users", {
+    method: "POST",
+    body: JSON.stringify(config),
+  });

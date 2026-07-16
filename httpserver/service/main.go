@@ -12,12 +12,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"mime"
+	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,21 +32,30 @@ import (
 )
 
 const (
-	serviceVersion = "0.2.0"
-	accessTTL      = 15 * time.Minute
-	refreshTTL     = 30 * 24 * time.Hour
-	passwordRounds = 120000
+	serviceVersion       = "0.3.0"
+	accessTTL            = 15 * time.Minute
+	refreshTTL           = 30 * 24 * time.Hour
+	passwordRounds       = 120000
+	defaultAPIBodyLimit  = int64(20 << 20)
+	defaultFileBodyLimit = int64(512 << 20)
 )
 
 var (
 	db           *sql.DB
 	registerMu   sync.Mutex
+	rateMu       sync.Mutex
+	rateBuckets  = map[string]*rateBucket{}
 	usernameExpr = regexp.MustCompile(`^[A-Za-z0-9._-]{3,32}$`)
 	allowedTypes = map[string]bool{
 		"sync": true, "config": true, "books": true, "notes": true,
 		"bookmarks": true, "words": true, "plugins": true,
 	}
 )
+
+type rateBucket struct {
+	Started time.Time
+	Count   int
+}
 
 type user struct {
 	ID          string `json:"id"`
@@ -73,8 +87,8 @@ func main() {
 		Addr:              ":" + port,
 		Handler:           http.HandlerFunc(route),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		ReadTimeout:       10 * time.Minute,
+		WriteTimeout:      10 * time.Minute,
 		IdleTimeout:       60 * time.Second,
 	}
 	log.Printf("Koodo self-hosted service %s listening on :%s", serviceVersion, port)
@@ -86,6 +100,68 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envInt64(key string, fallback int64) int64 {
+	value, err := strconv.ParseInt(env(key, ""), 10, 64)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func serviceCapabilities() []string {
+	return []string{"sync.data", "sync.koreader", "storage.files"}
+}
+
+func requestIP(r *http.Request) string {
+	forwardedParts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	if forwarded := strings.TrimSpace(forwardedParts[len(forwardedParts)-1]); forwarded != "" {
+		return forwarded
+	}
+	host := r.RemoteAddr
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	}
+	return host
+}
+
+func allowRate(r *http.Request, limit int, window time.Duration) bool {
+	now := time.Now()
+	key := requestIP(r) + "|" + r.URL.Path
+	rateMu.Lock()
+	defer rateMu.Unlock()
+	if len(rateBuckets) > 4096 {
+		for name, item := range rateBuckets {
+			if now.Sub(item.Started) >= window {
+				delete(rateBuckets, name)
+			}
+		}
+	}
+	bucket := rateBuckets[key]
+	if bucket == nil && len(rateBuckets) >= 8192 {
+		return false
+	}
+	if bucket == nil || now.Sub(bucket.Started) >= window {
+		rateBuckets[key] = &rateBucket{Started: now, Count: 1}
+		return true
+	}
+	if bucket.Count >= limit {
+		return false
+	}
+	bucket.Count++
+	return true
+}
+
+func isSensitiveRoute(r *http.Request) bool {
+	if r.Method == http.MethodPost && (r.URL.Path == "/v1/auth/login" || r.URL.Path == "/v1/auth/register" || r.URL.Path == "/v1/auth/refresh" || r.URL.Path == "/users/create") {
+		return true
+	}
+	return r.Method == http.MethodGet && r.URL.Path == "/users/auth"
+}
+
+func isFileRoute(r *http.Request) bool {
+	return r.URL.Path == "/upload" || r.URL.Path == "/download" || r.URL.Path == "/delete" || r.URL.Path == "/list"
 }
 
 func openDatabase() error {
@@ -163,6 +239,11 @@ func openDatabase() error {
 		}
 	}
 	_, _ = db.Exec(`INSERT OR IGNORE INTO settings(key,value) VALUES ('registration_mode','invite'), ('service_name','Koodo Reader')`)
+	defaultKoreaderRegistration := "true"
+	if strings.EqualFold(env("ENABLE_KOREADER_REGISTRATION", "true"), "false") {
+		defaultKoreaderRegistration = "false"
+	}
+	_, _ = db.Exec(`INSERT OR IGNORE INTO settings(key,value) VALUES ('koreader_registration_enabled',?)`, defaultKoreaderRegistration)
 	return db.Ping()
 }
 
@@ -173,6 +254,16 @@ func route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	if isSensitiveRoute(r) && !allowRate(r, 20, time.Minute) {
+		w.Header().Set("Retry-After", "60")
+		writeAPI(w, http.StatusTooManyRequests, http.StatusTooManyRequests, "请求过于频繁，请稍后重试", nil)
+		return
+	}
+	if isFileRoute(r) && !allowRate(r, 600, time.Minute) {
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "Too many requests", http.StatusTooManyRequests)
+		return
+	}
 
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/health":
@@ -203,6 +294,16 @@ func route(w http.ResponseWriter, r *http.Request) {
 		handleListInvites(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/admin/users":
 		handleListUsers(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/users":
+		handleCreateUser(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/upload":
+		handleFileUpload(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/download":
+		handleFileDownload(w, r)
+	case r.Method == http.MethodDelete && r.URL.Path == "/delete":
+		handleFileDelete(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/list":
+		handleFileList(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/users/create":
 		handleKoreaderCreateUser(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/users/auth":
@@ -230,7 +331,16 @@ func setCORS(w http.ResponseWriter, r *http.Request) {
 
 func isAllowedOrigin(origin string, r *http.Request) bool {
 	parsed, err := url.Parse(origin)
-	if err == nil && parsed.Host != "" && strings.EqualFold(parsed.Host, r.Host) {
+	requestScheme := "http"
+	if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]); forwarded != "" {
+		requestScheme = forwarded
+	} else if r.TLS != nil {
+		requestScheme = "https"
+	}
+	if err == nil && parsed.Host != "" && strings.EqualFold(parsed.Host, r.Host) && strings.EqualFold(parsed.Scheme, requestScheme) {
+		return true
+	}
+	if origin == "https://localhost" || origin == "capacitor://localhost" {
 		return true
 	}
 	for _, allowed := range strings.Split(os.Getenv("SERVICE_ALLOWED_ORIGINS"), ",") {
@@ -248,7 +358,7 @@ func writeAPI(w http.ResponseWriter, status, code int, msg string, data any) {
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, target any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, envInt64("SERVICE_MAX_BODY_BYTES", defaultAPIBodyLimit))
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(target); err != nil {
 		writeAPI(w, http.StatusBadRequest, http.StatusBadRequest, "请求格式无效", nil)
@@ -259,7 +369,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, target any) bool {
 
 func handleHealth(w http.ResponseWriter) {
 	writeAPI(w, http.StatusOK, 200, "success", map[string]any{
-		"version": serviceVersion, "capabilities": []string{"sync.data", "sync.koreader"},
+		"version": serviceVersion, "capabilities": serviceCapabilities(),
 	})
 }
 
@@ -617,9 +727,10 @@ func handlePutSync(w http.ResponseWriter, r *http.Request) {
 
 func adminConfigData() map[string]any {
 	return map[string]any{
-		"registration_mode": setting("registration_mode", "invite"),
-		"service_name":      setting("service_name", "Koodo Reader"),
-		"capabilities":      []string{"sync.data", "sync.koreader"},
+		"registration_mode":             setting("registration_mode", "invite"),
+		"service_name":                  setting("service_name", "Koodo Reader"),
+		"capabilities":                  serviceCapabilities(),
+		"koreader_registration_enabled": strings.EqualFold(setting("koreader_registration_enabled", "true"), "true"),
 	}
 }
 
@@ -635,8 +746,9 @@ func handleUpdateAdminConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		RegistrationMode string `json:"registration_mode"`
-		ServiceName      string `json:"service_name"`
+		RegistrationMode            string `json:"registration_mode"`
+		ServiceName                 string `json:"service_name"`
+		KoreaderRegistrationEnabled *bool  `json:"koreader_registration_enabled"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -663,6 +775,12 @@ func handleUpdateAdminConfig(w http.ResponseWriter, r *http.Request) {
 	if err := saveSetting(tx, "service_name", body.ServiceName); err != nil {
 		writeAPI(w, 500, 500, "保存服务配置失败", nil)
 		return
+	}
+	if body.KoreaderRegistrationEnabled != nil {
+		if err := saveSetting(tx, "koreader_registration_enabled", strconv.FormatBool(*body.KoreaderRegistrationEnabled)); err != nil {
+			writeAPI(w, 500, 500, "保存服务配置失败", nil)
+			return
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		writeAPI(w, 500, 500, "保存服务配置失败", nil)
@@ -767,6 +885,57 @@ func handleListUsers(w http.ResponseWriter, r *http.Request) {
 	writeAPI(w, 200, 200, "success", users)
 }
 
+func handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	if requireAdmin(w, r) == nil {
+		return
+	}
+	var body struct {
+		Username    string `json:"username"`
+		Password    string `json:"password"`
+		DisplayName string `json:"display_name"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	body.Username = strings.TrimSpace(body.Username)
+	body.DisplayName = strings.TrimSpace(body.DisplayName)
+	if !usernameExpr.MatchString(body.Username) {
+		writeAPI(w, 422, 422, "用户名须为 3–32 位字母、数字、点、下划线或连字符", nil)
+		return
+	}
+	if len(body.Password) < 8 || len(body.Password) > 128 {
+		writeAPI(w, 422, 422, "密码长度须为 8–128 位", nil)
+		return
+	}
+	if len([]rune(body.DisplayName)) > 64 {
+		writeAPI(w, 422, 422, "显示名称不能超过 64 个字符", nil)
+		return
+	}
+	if body.DisplayName == "" {
+		body.DisplayName = body.Username
+	}
+	passwordHash, err := makePasswordHash(body.Password)
+	if err != nil {
+		writeAPI(w, 500, 500, "创建账号失败", nil)
+		return
+	}
+	account := user{
+		ID: randomString(18), Username: body.Username, DisplayName: body.DisplayName,
+		Role: "user", CreatedAt: time.Now().Unix(),
+	}
+	_, err = db.Exec(`INSERT INTO users(id,username,password_hash,display_name,role,created_at) VALUES(?,?,?,?,?,?)`,
+		account.ID, account.Username, passwordHash, account.DisplayName, account.Role, account.CreatedAt)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			writeAPI(w, 409, 409, "用户名已存在", nil)
+		} else {
+			writeAPI(w, 500, 500, "创建账号失败", nil)
+		}
+		return
+	}
+	writeAPI(w, 200, 200, "账号创建成功", account)
+}
+
 func writeKoreaderJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -794,7 +963,7 @@ func authenticateKoreader(r *http.Request) string {
 }
 
 func handleKoreaderCreateUser(w http.ResponseWriter, r *http.Request) {
-	if strings.EqualFold(env("ENABLE_KOREADER_REGISTRATION", "true"), "false") {
+	if !strings.EqualFold(setting("koreader_registration_enabled", "true"), "true") {
 		writeKoreaderError(w, http.StatusPaymentRequired, 2005, "User registration is disabled.")
 		return
 	}
@@ -825,7 +994,7 @@ func handleKoreaderCreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeKoreaderBody(w http.ResponseWriter, r *http.Request, target any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, envInt64("SERVICE_MAX_BODY_BYTES", defaultAPIBodyLimit))
 	decoder := json.NewDecoder(r.Body)
 	return decoder.Decode(target) == nil
 }
@@ -896,6 +1065,237 @@ func handleKoreaderGetProgress(w http.ResponseWriter, r *http.Request) {
 		result["device_id"] = deviceID
 	}
 	writeKoreaderJSON(w, http.StatusOK, result)
+}
+
+func authenticateFileUser(w http.ResponseWriter, r *http.Request) *user {
+	username, password, ok := r.BasicAuth()
+	if !ok || !usernameExpr.MatchString(username) || password == "" {
+		w.Header().Set("WWW-Authenticate", `Basic realm="Koodo file storage"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return nil
+	}
+	var account user
+	var passwordHash string
+	err := db.QueryRow(`SELECT id,username,password_hash,display_name,role,created_at FROM users WHERE username=?`, username).
+		Scan(&account.ID, &account.Username, &passwordHash, &account.DisplayName, &account.Role, &account.CreatedAt)
+	if err != nil || !verifyPassword(password, passwordHash) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="Koodo file storage"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return nil
+	}
+	return &account
+}
+
+func storageRoot(userID string) string {
+	return filepath.Join(env("SERVICE_FILES_DIR", "/data/files"), userID)
+}
+
+func resolveStoragePath(userID, directory string, names ...string) (string, error) {
+	root := storageRoot(userID)
+	directory = strings.Trim(strings.ReplaceAll(directory, "\\", "/"), "/")
+	cleanDir := filepath.Clean(filepath.FromSlash(directory))
+	if cleanDir == "." {
+		cleanDir = ""
+	}
+	target := filepath.Join(append([]string{root, cleanDir}, names...)...)
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", errors.New("Invalid path")
+	}
+	return target, nil
+}
+
+func safeStorageFilename(name string) string {
+	name = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
+	for _, char := range `/:*?"<>|` {
+		name = strings.ReplaceAll(name, string(char), "_")
+	}
+	if name == "" || name == "." || name == ".." {
+		return ""
+	}
+	return name
+}
+
+func writeStorageJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func handleFileUpload(w http.ResponseWriter, r *http.Request) {
+	account := authenticateFileUser(w, r)
+	if account == nil {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, envInt64("SERVICE_FILE_MAX_BYTES", defaultFileBodyLimit))
+	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || !strings.HasPrefix(mediaType, "multipart/") || params["boundary"] == "" {
+		http.Error(w, "Invalid multipart request", http.StatusBadRequest)
+		return
+	}
+	directory := r.URL.Query().Get("dir")
+	targetDir, err := resolveStoragePath(account.ID, directory)
+	if err != nil {
+		http.Error(w, "Invalid storage path", http.StatusBadRequest)
+		return
+	}
+	if err := os.MkdirAll(targetDir, 0o700); err != nil {
+		http.Error(w, "Storage unavailable", http.StatusInternalServerError)
+		return
+	}
+	reader := multipart.NewReader(r.Body, params["boundary"])
+	for {
+		part, partErr := reader.NextPart()
+		if partErr == io.EOF {
+			break
+		}
+		if partErr != nil {
+			http.Error(w, "Invalid multipart data", http.StatusBadRequest)
+			return
+		}
+		filename := safeStorageFilename(part.FileName())
+		if filename == "" {
+			part.Close()
+			continue
+		}
+		target, pathErr := resolveStoragePath(account.ID, directory, filename)
+		if pathErr != nil {
+			part.Close()
+			http.Error(w, "Invalid filename", http.StatusBadRequest)
+			return
+		}
+		temp, createErr := os.CreateTemp(targetDir, ".upload-*")
+		if createErr != nil {
+			part.Close()
+			http.Error(w, "Storage unavailable", http.StatusInternalServerError)
+			return
+		}
+		tempName := temp.Name()
+		_, copyErr := io.Copy(temp, part)
+		closeErr := temp.Close()
+		part.Close()
+		if copyErr != nil || closeErr != nil {
+			_ = os.Remove(tempName)
+			http.Error(w, "Upload failed", http.StatusInternalServerError)
+			return
+		}
+		if err := os.Rename(tempName, target); err != nil {
+			_ = os.Remove(tempName)
+			http.Error(w, "Upload failed", http.StatusInternalServerError)
+			return
+		}
+		writeStorageJSON(w, http.StatusOK, map[string]any{"success": true, "filename": filename, "directory": directory})
+		return
+	}
+	http.Error(w, "No file uploaded", http.StatusBadRequest)
+}
+
+func handleFileDownload(w http.ResponseWriter, r *http.Request) {
+	account := authenticateFileUser(w, r)
+	if account == nil {
+		return
+	}
+	filename := safeStorageFilename(r.URL.Query().Get("filename"))
+	if filename == "" {
+		http.Error(w, "Missing filename", http.StatusBadRequest)
+		return
+	}
+	target, err := resolveStoragePath(account.ID, r.URL.Query().Get("dir"), filename)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	if info, statErr := os.Stat(target); statErr != nil || !info.Mode().IsRegular() {
+		if os.IsNotExist(statErr) {
+			http.Error(w, "File not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Invalid file", http.StatusBadRequest)
+		}
+		return
+	}
+	http.ServeFile(w, r, target)
+}
+
+func handleFileDelete(w http.ResponseWriter, r *http.Request) {
+	account := authenticateFileUser(w, r)
+	if account == nil {
+		return
+	}
+	filename := safeStorageFilename(r.URL.Query().Get("filename"))
+	if filename == "" {
+		http.Error(w, "Missing filename", http.StatusBadRequest)
+		return
+	}
+	target, err := resolveStoragePath(account.ID, r.URL.Query().Get("dir"), filename)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	if err := os.Remove(target); err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "File not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Delete failed", http.StatusInternalServerError)
+		}
+		return
+	}
+	writeStorageJSON(w, http.StatusOK, map[string]any{"success": true, "filename": filename})
+}
+
+type storageFileEntry struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Size         *int64 `json:"size"`
+	ModifiedTime string `json:"modifiedTime"`
+	CreatedTime  string `json:"createdTime"`
+}
+
+func handleFileList(w http.ResponseWriter, r *http.Request) {
+	account := authenticateFileUser(w, r)
+	if account == nil {
+		return
+	}
+	directory := r.URL.Query().Get("dir")
+	target, err := resolveStoragePath(account.ID, directory)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	entries, err := os.ReadDir(target)
+	if os.IsNotExist(err) {
+		entries = []os.DirEntry{}
+	} else if err != nil {
+		http.Error(w, "List failed", http.StatusInternalServerError)
+		return
+	}
+	items := make([]storageFileEntry, 0, len(entries))
+	for _, entry := range entries {
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			continue
+		}
+		item := storageFileEntry{
+			Name: entry.Name(), ModifiedTime: info.ModTime().UTC().Format(time.RFC3339),
+			CreatedTime: info.ModTime().UTC().Format(time.RFC3339),
+		}
+		if entry.IsDir() {
+			item.Type = "directory"
+		} else {
+			item.Type = "file"
+			size := info.Size()
+			item.Size = &size
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Type != items[j].Type {
+			return items[i].Type == "directory"
+		}
+		return items[i].Name < items[j].Name
+	})
+	writeStorageJSON(w, http.StatusOK, map[string]any{
+		"success": true, "directory": directory, "files": items, "totalCount": len(items),
+	})
 }
 
 func randomString(byteLength int) string {

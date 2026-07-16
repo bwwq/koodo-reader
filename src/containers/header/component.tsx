@@ -240,9 +240,9 @@ class Header extends React.Component<HeaderProps, HeaderState> {
     _nextContext: any
   ) {
     if (nextProps.isServiceConnected && nextProps.isServiceConnected !== this.props.isServiceConnected) {
-      if (ConfigService.getReaderConfig("isProUpgraded") !== "yes") {
+      if (ConfigService.getReaderConfig("isSyncRecordUpgraded") !== "yes") {
         try {
-          ConfigService.setReaderConfig("isProUpgraded", "yes");
+          ConfigService.setReaderConfig("isSyncRecordUpgraded", "yes");
           await generateSyncRecord();
         } catch (error) {
           console.error(error);

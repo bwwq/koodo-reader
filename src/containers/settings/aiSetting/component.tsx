@@ -9,6 +9,13 @@ import {
   TokenService,
 } from "../../../assets/lib/kookit-extra-browser.min";
 
+const unsupportedNativeProviders = new Set([
+  "anthropic",
+  "replicate",
+  "aws_bedrock",
+  "azure",
+]);
+
 class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
   constructor(props: SettingInfoProps) {
     super(props);
@@ -172,29 +179,42 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
   };
 
   handleTest = async () => {
-    const { endpoint, modelId, apiKey } = this.state;
+    const { endpoint, modelId, apiKey, capabilities } = this.state;
     if (!endpoint || !modelId) {
       toast.error(this.props.t("Please fill in all required fields"));
       return;
     }
     this.setState({ isTesting: true, testResult: "" });
     try {
-      const chatEndpoint = endpoint.endsWith("/")
-        ? endpoint + "chat/completions"
-        : endpoint + "/chat/completions";
-      const response = await fetch(chatEndpoint, {
+      const normalized = endpoint.replace(/\/+$/, "");
+      const isTtsOnly =
+        capabilities.includes("tts") &&
+        !capabilities.includes("chat") &&
+        !capabilities.includes("vision");
+      const testEndpoint = isTtsOnly
+        ? normalized.endsWith("/audio/speech")
+          ? normalized
+          : normalized + "/audio/speech"
+        : normalized.endsWith("/chat/completions")
+          ? normalized
+          : normalized + "/chat/completions";
+      const response = await fetch(testEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         },
-        body: JSON.stringify({
-          model: modelId,
-          messages: [
-            { role: "user", content: "Hi, just testing. Reply with OK." },
-          ],
-          max_tokens: 10,
-        }),
+        body: JSON.stringify(
+          isTtsOnly
+            ? { model: modelId, input: "Koodo Reader test", voice: "alloy" }
+            : {
+                model: modelId,
+                messages: [
+                  { role: "user", content: "Hi, just testing. Reply with OK." },
+                ],
+                max_tokens: 10,
+              }
+        ),
       });
       if (!response.ok) {
         const errorText = await response.text();
@@ -202,10 +222,13 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
           `HTTP ${response.status}: ${errorText.substring(0, 200)}`
         );
       }
-      const data = await response.json();
-      const reply =
-        data.choices?.[0]?.message?.content ||
-        JSON.stringify(data).substring(0, 100);
+      const reply = isTtsOnly
+        ? this.props.t("Audio response received")
+        : await response.json().then(
+            (data) =>
+              data.choices?.[0]?.message?.content ||
+              JSON.stringify(data).substring(0, 100)
+          );
       this.setState({ testResult: "success" });
       toast.success(this.props.t("Test successful") + ": " + reply);
     } catch (e: any) {
@@ -396,7 +419,9 @@ class AISetting extends React.Component<SettingInfoProps, SettingInfoState> {
             <option value="" className="lang-setting-option">
               {this.props.t("Please select")}
             </option>
-            {KookitConfig.AiProviderList.map((p) => (
+            {KookitConfig.AiProviderList.filter(
+              (p) => !unsupportedNativeProviders.has(p.id)
+            ).map((p) => (
               <option key={p.id} value={p.id} className="lang-setting-option">
                 {this.props.t(p.name)}
               </option>

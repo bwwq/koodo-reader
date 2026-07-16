@@ -1261,5 +1261,15 @@
   "Registered accounts": "已注册账号",
   "Create first administrator": "创建首位管理员",
   "Create administrator": "创建管理员",
-  "The first registered account becomes the administrator and can configure this service.": "第一个注册的账号将成为管理员，并可配置此服务端。"
+  "The first registered account becomes the administrator and can configure this service.": "第一个注册的账号将成为管理员，并可配置此服务端。",
+  "Display name": "显示名称",
+  "Temporary password": "临时密码",
+  "Creates a normal user without an invitation code": "直接创建普通账号，无需邀请码",
+  "Account created": "账号已创建",
+  "Failed to create account": "账号创建失败",
+  "Audio response received": "已收到音频响应",
+  "KOReader public registration": "允许公开注册 KOReader 账号",
+  "Use the online service address and your account credentials. Files are isolated by account. HTTPS is required when the web app is opened over HTTPS.": "使用在线服务地址和当前账号凭据。文件按账号隔离；网页通过 HTTPS 打开时，服务地址也必须使用 HTTPS。",
+  "AI vision OCR": "AI 视觉 OCR",
+  "AI model voice": "AI 模型语音"
 }

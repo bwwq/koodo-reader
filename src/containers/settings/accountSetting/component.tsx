@@ -9,6 +9,7 @@ import { getServiceDevice } from "../../../utils/request/user";
 import {
   bindSyncToCurrentUser,
   createAdminInvites,
+  createAdminUser,
   getAdminConfig,
   getAdminUsers,
   getAuthConfig,
@@ -51,6 +52,10 @@ class AccountSetting extends React.Component<
     inviteDays: "7",
     generatedInvites: [],
     adminUsers: [],
+    adminNewUsername: "",
+    adminNewPassword: "",
+    adminNewDisplayName: "",
+    koreaderRegistrationEnabled: true,
   };
 
   async componentDidMount() {
@@ -113,6 +118,8 @@ class AccountSetting extends React.Component<
       this.setState({
         adminRegistrationMode: config.data.registration_mode,
         serviceName: config.data.service_name,
+        koreaderRegistrationEnabled:
+          config.data.koreader_registration_enabled !== false,
       });
     }
     if (users.code === 200) this.setState({ adminUsers: users.data || [] });
@@ -124,6 +131,8 @@ class AccountSetting extends React.Component<
       const response = await updateAdminConfig({
         registration_mode: this.state.adminRegistrationMode,
         service_name: this.state.serviceName.trim(),
+        koreader_registration_enabled:
+          this.state.koreaderRegistrationEnabled,
       });
       if (response.code !== 200) throw new Error(response.msg);
       await this.refreshServiceInfo(true);
@@ -159,6 +168,47 @@ class AccountSetting extends React.Component<
         error instanceof Error
           ? error.message
           : this.props.t("Failed to create invitation code")
+      );
+    } finally {
+      this.setState({ isLoading: false });
+    }
+  };
+
+  createUser = async () => {
+    const username = this.state.adminNewUsername.trim();
+    const password = this.state.adminNewPassword;
+    if (!/^[A-Za-z0-9._-]{3,32}$/.test(username)) {
+      toast.error(
+        this.props.t(
+          "Username must be 3-32 letters, numbers, dots, underscores or hyphens"
+        )
+      );
+      return;
+    }
+    if (password.length < 8 || password.length > 128) {
+      toast.error(this.props.t("Password must be 8-128 characters"));
+      return;
+    }
+    this.setState({ isLoading: true });
+    try {
+      const response = await createAdminUser({
+        username,
+        password,
+        display_name: this.state.adminNewDisplayName.trim(),
+      });
+      if (response.code !== 200) throw new Error(response.msg);
+      this.setState({
+        adminNewUsername: "",
+        adminNewPassword: "",
+        adminNewDisplayName: "",
+      });
+      await this.refreshAdminInfo();
+      toast.success(this.props.t("Account created"));
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : this.props.t("Failed to create account")
       );
     } finally {
       this.setState({ isLoading: false });
@@ -315,7 +365,10 @@ class AccountSetting extends React.Component<
       | "confirmPassword"
       | "inviteCode"
       | "serviceName"
-      | "inviteDays",
+      | "inviteDays"
+      | "adminNewUsername"
+      | "adminNewPassword"
+      | "adminNewDisplayName",
     type = "text",
     placeholder = ""
   ) => (
@@ -328,7 +381,13 @@ class AccountSetting extends React.Component<
         value={this.state[key]}
         placeholder={this.props.t(placeholder)}
         onChange={(event) => this.setState({ [key]: event.target.value } as any)}
-        autoComplete={key === "password" ? "current-password" : "off"}
+        autoComplete={
+          key === "password"
+            ? "current-password"
+            : key === "adminNewPassword"
+              ? "new-password"
+              : "off"
+        }
       />
     </div>
   );
@@ -340,7 +399,10 @@ class AccountSetting extends React.Component<
         <span><Trans>Administrator</Trans></span>
       </div>
       {this.renderInput("Service name", "serviceName", "text")}
-      <div className="setting-dialog-new-title" style={{ alignItems: "center" }}>
+      <div
+        className="setting-dialog-new-title"
+        style={{ alignItems: "center" }}
+      >
         <Trans>Registration mode</Trans>
         <select
           className="setting-dialog-new-input"
@@ -355,6 +417,16 @@ class AccountSetting extends React.Component<
           <option value="invite">{this.props.t("Invitation code registration")}</option>
           <option value="admin">{this.props.t("Disable registration")}</option>
         </select>
+      </div>
+      <div className="setting-dialog-new-title" style={{ alignItems: "center" }}>
+        <Trans>KOReader public registration</Trans>
+        <input
+          type="checkbox"
+          checked={this.state.koreaderRegistrationEnabled}
+          onChange={(event) =>
+            this.setState({ koreaderRegistrationEnabled: event.target.checked })
+          }
+        />
       </div>
       <div className="setting-dialog-new-title">
         <Trans>Save service settings</Trans>
@@ -398,6 +470,27 @@ class AccountSetting extends React.Component<
             `${account.username}${account.role === "admin" ? ` (${this.props.t("Administrator")})` : ""}`
           ).join(", ") || "-"}
         </span>
+      </div>
+      <div className="setting-dialog-new-title">
+        <strong>
+          <Trans>Create account</Trans>
+        </strong>
+        <span>
+          <Trans>Creates a normal user without an invitation code</Trans>
+        </span>
+      </div>
+      {this.renderInput("Username", "adminNewUsername", "text")}
+      {this.renderInput("Display name", "adminNewDisplayName", "text")}
+      {this.renderInput("Temporary password", "adminNewPassword", "password")}
+      <div className="setting-dialog-new-title">
+        <Trans>Create account</Trans>
+        <button
+          className="change-location-button"
+          disabled={this.state.isLoading}
+          onClick={this.createUser}
+        >
+          <Trans>Create</Trans>
+        </button>
       </div>
     </>
   );
