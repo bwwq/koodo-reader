@@ -5,7 +5,7 @@ COPY legado-engine /src/legado-engine
 WORKDIR /src/legado-engine
 RUN gradle --no-daemon shadowJar
 
-FROM eclipse-temurin:8-jre-alpine
+FROM amazoncorretto:8-alpine-jre
 RUN addgroup -S legado && adduser -S -G legado legado \
     && mkdir -p /data/jobs && chown -R legado:legado /data
 COPY --from=builder /src/legado-engine/build/libs/koodo-legado-engine.jar /app/engine.jar
