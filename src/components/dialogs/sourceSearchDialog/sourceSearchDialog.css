@@ -48,6 +48,10 @@
 .source-results { flex: 1; min-width: 0; overflow: auto; padding: 14px; }
 .source-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; opacity: .55; }
 .source-empty span { font-size: 12px; }
+.source-auth-empty { gap: 10px; padding: 24px; text-align: center; }
+.source-auth-empty button { padding: 8px 16px; background: #f16464; color: #fff; }
+.source-list-message { padding: 18px 10px; font-size: 12px; line-height: 1.5; opacity: .6; }
+.source-list-error { color: #e05252; opacity: 1; }
 .source-result-card { display: flex; gap: 13px; padding: 13px; margin-bottom: 10px; border: 1px solid rgba(128,128,128,.18); border-radius: 11px; }
 .source-result-card > img, .source-cover-placeholder { width: 62px; height: 84px; object-fit: cover; flex: 0 0 62px; border-radius: 5px; background: rgba(128,128,128,.12); display: flex; align-items: center; justify-content: center; font-size: 24px; opacity: .65; }
 .source-result-info { min-width: 0; flex: 1; }

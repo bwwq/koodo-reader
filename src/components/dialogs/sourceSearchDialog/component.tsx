@@ -23,6 +23,8 @@ import { groupSourceResults, toggleSourceSelection } from "./sourceSearchUtils";
 
 interface Props {
   handleSourceSearchDialog: (open: boolean) => void;
+  handleSetting: (open: boolean) => void;
+  handleSettingMode: (mode: string) => void;
   importBookFunc: (file: File) => Promise<void>;
   t: (key: string) => string;
 }
@@ -52,22 +54,38 @@ function SourceSearchDialog(props: Props) {
   const [sourceURL, setSourceURL] = useState("");
   const [showSources, setShowSources] = useState(true);
   const [job, setJob] = useState<BookImportJob | null>(null);
+  const [loadingSources, setLoadingSources] = useState(true);
+  const [sourceError, setSourceError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refreshSources = async () => {
-    const response = await listBookSources();
-    if (response.code !== 200 || !response.data) {
-      toast.error(response.msg || "请先登录自托管服务");
-      return;
-    }
-    setSources(response.data);
-    const enabled = response.data.filter((item) => item.enabled).map((item) => item.id);
-    let remembered: string[] = [];
+    setLoadingSources(true);
     try {
-      remembered = JSON.parse(localStorage.getItem(LAST_SELECTION_KEY) || "[]");
-    } catch {}
-    const available = remembered.filter((id) => enabled.includes(id));
-    setSelected(available.length ? available : enabled);
+      const response = await listBookSources();
+      if (response.code !== 200 || !response.data) {
+        setSources([]);
+        setSelected([]);
+        setSourceError(
+          response.code === 400
+            ? "请先配置自托管服务地址。"
+            : response.code === 401
+            ? "请先登录自托管服务，书源和搜索任务会按账号保存。"
+            : response.msg || "书源加载失败，请检查服务连接。"
+        );
+        return;
+      }
+      setSourceError("");
+      setSources(response.data);
+      const enabled = response.data.filter((item) => item.enabled).map((item) => item.id);
+      let remembered: string[] = [];
+      try {
+        remembered = JSON.parse(localStorage.getItem(LAST_SELECTION_KEY) || "[]");
+      } catch {}
+      const available = remembered.filter((id) => enabled.includes(id));
+      setSelected(available.length ? available : enabled);
+    } finally {
+      setLoadingSources(false);
+    }
   };
 
   const migrateLocalOPDS = async () => {
@@ -197,6 +215,12 @@ function SourceSearchDialog(props: Props) {
     await refreshSources();
   };
 
+  const openOnlineServiceSettings = () => {
+    props.handleSourceSearchDialog(false);
+    props.handleSettingMode("account");
+    props.handleSetting(true);
+  };
+
   const close = () => {
     if (searching || (job && ["queued", "running"].includes(job.status))) {
       if (!window.confirm("搜索或导入仍在进行，确定关闭？")) return;
@@ -225,7 +249,7 @@ function SourceSearchDialog(props: Props) {
           placeholder="输入书名或作者"
           autoFocus
         />
-        <button className="source-primary" disabled={searching} onClick={() => runSearch(1)}>
+        <button className="source-primary" disabled={searching || loadingSources || !!sourceError} onClick={() => runSearch(1)}>
           {searching ? "搜索中…" : "搜索"}
         </button>
       </div>
@@ -241,7 +265,14 @@ function SourceSearchDialog(props: Props) {
               </span>
             </div>
             <div className="source-list">
-              {sources.map((source) => (
+              {loadingSources && <div className="source-list-message">正在加载书源…</div>}
+              {!loadingSources && sourceError && (
+                <div className="source-list-message source-list-error">书源暂不可用</div>
+              )}
+              {!loadingSources && !sourceError && !sources.length && (
+                <div className="source-list-message">暂无书源，请导入文件或远程 JSON。</div>
+              )}
+              {!loadingSources && !sourceError && sources.map((source) => (
                 <div className={`source-row ${source.enabled ? "" : "disabled"}`} key={source.id}>
                   <label>
                     <input type="checkbox" checked={selected.includes(source.id)} disabled={!source.enabled} onChange={() => toggleSource(source.id)} />
@@ -267,8 +298,16 @@ function SourceSearchDialog(props: Props) {
         )}
 
         <section className="source-results">
-          {!groups.length && !searching && <div className="source-empty"><b>搜索你的书源</b><span>同名同作者会自动合并，导入时仍可选择具体来源。</span></div>}
-          {groups.map((group) => (
+          {sourceError ? (
+            <div className="source-empty source-auth-empty">
+              <b>{sourceError.includes("登录") ? "请先登录自托管服务" : "书源暂不可用"}</b>
+              <span>{sourceError}</span>
+              <button onClick={openOnlineServiceSettings}>{sourceError.includes("登录") ? "去登录" : "去设置"}</button>
+            </div>
+          ) : (
+            <>
+              {!groups.length && !searching && <div className="source-empty"><b>搜索你的书源</b><span>同名同作者会自动合并，导入时仍可选择具体来源。</span></div>}
+              {groups.map((group) => (
             <article className="source-result-card" key={group.key}>
               {group.variants[0].cover_url ? <img src={group.variants[0].cover_url} alt="" /> : <div className="source-cover-placeholder">书</div>}
               <div className="source-result-info">
@@ -285,8 +324,10 @@ function SourceSearchDialog(props: Props) {
                 </div>
               </div>
             </article>
-          ))}
-          {!!groups.length && <button className="source-load-more" disabled={searching} onClick={() => runSearch(page + 1)}>加载更多</button>}
+              ))}
+              {!!groups.length && <button className="source-load-more" disabled={searching} onClick={() => runSearch(page + 1)}>加载更多</button>}
+            </>
+          )}
         </section>
       </main>
 
