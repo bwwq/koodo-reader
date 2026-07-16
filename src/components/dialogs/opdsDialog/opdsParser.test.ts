@@ -5,6 +5,9 @@ import {
   parseOPDSResponse,
 } from "./opdsParser";
 
+declare const test: (name: string, run: () => void) => void;
+declare const expect: (value: unknown) => any;
+
 test("parses OPDS 1 navigation and acquisition entries", () => {
   const feed = parseOPDS1Feed(
     `<?xml version="1.0"?>
