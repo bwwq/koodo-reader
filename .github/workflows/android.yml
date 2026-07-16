@@ -49,6 +49,11 @@ jobs:
       - name: Install JavaScript dependencies
         run: yarn install --frozen-lockfile --ignore-scripts --network-timeout 1000000
 
+      - name: Run React tests
+        env:
+          CI: true
+        run: yarn test --watchAll=false --runInBand
+
       - name: Build web app and sync Android project
         run: yarn android:sync
 

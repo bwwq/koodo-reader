@@ -13,6 +13,12 @@ import {
   OPDSDialogState,
 } from "./interface";
 import { supportedFormats } from "../../../utils/common";
+import {
+  ACQUISITION_RELS,
+  DOWNLOAD_TYPES,
+  isOPDSNavigationLink,
+  parseOPDSResponse,
+} from "./opdsParser";
 
 const BUILT_IN_CATALOGS: OPDSCatalog[] = [
   {
@@ -23,31 +29,19 @@ const BUILT_IN_CATALOGS: OPDSCatalog[] = [
     isElectronicOnly: false,
   },
   {
-    id: "manybooks",
-    title: "ManyBooks",
-    url: "https://manybooks.net/opds/index.php",
+    id: "internet-archive",
+    title: "Internet Archive",
+    url: "https://archive.org/services/opds",
     isBuiltIn: true,
-    isElectronicOnly: true,
+    isElectronicOnly: false,
   },
-];
-
-const DOWNLOAD_TYPES: Record<string, string> = {
-  "application/epub+zip": "epub",
-  "application/pdf": "pdf",
-  "application/x-mobipocket-ebook": "mobi",
-  "application/x-cbz": "cbz",
-  "application/x-cbr": "cbr",
-  "text/html": "html",
-  "application/fb2+zip": "fb2",
-  "application/fb2": "fb2",
-};
-
-const ACQUISITION_RELS = [
-  "http://opds-spec.org/acquisition",
-  "http://opds-spec.org/acquisition/open-access",
-  "http://opds-spec.org/acquisition/buy",
-  "http://opds-spec.org/acquisition/borrow",
-  "http://opds-spec.org/acquisition/sample",
+  {
+    id: "textos-info",
+    title: "textos.info (Español)",
+    url: "https://www.textos.info/catalogo.atom",
+    isBuiltIn: true,
+    isElectronicOnly: false,
+  },
 ];
 
 function encodeBasicAuth(username: string, password: string): string {
@@ -332,7 +326,11 @@ async function fetchOPDSFeed(
   if (!response.ok)
     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
   const text = await response.text();
-  return parseOPDSFeed(text, url);
+  return parseOPDSResponse(
+    text,
+    url,
+    response.headers.get("content-type") || ""
+  );
 }
 
 interface AuthenticatedImageProps {
@@ -483,11 +481,7 @@ class OPDSDialog extends React.Component<OPDSDialogProps, OPDSDialogState> {
   navigateToEntry = async (entry: OPDSEntry) => {
     const { currentCatalogAuth } = this.state;
     const navLink = entry.links.find(
-      (l) =>
-        l.type?.includes("application/atom+xml") ||
-        l.type?.includes("text/html") ||
-        l.rel === "subsection" ||
-        l.rel === "related"
+      (link) => isOPDSNavigationLink(link)
     );
     if (!navLink) return;
     this.setState((prev) => ({
@@ -837,12 +831,30 @@ class OPDSDialog extends React.Component<OPDSDialogProps, OPDSDialogState> {
           </div>
         ) : null}
 
+        <div className="opds-section-label">
+          <Trans>Popular OPDS Catalogs</Trans>
+        </div>
+        {BUILT_IN_CATALOGS.map((catalog) => (
+          <div key={catalog.id} className="cloud-drive-item">
+            <span
+              className="cloud-drive-label"
+              onClick={() => this.openCatalog(catalog)}
+            >
+              {catalog.title}
+            </span>
+            <span
+              className="icon-dropdown import-dialog-more-file"
+              onClick={() => this.openCatalog(catalog)}
+            ></span>
+          </div>
+        ))}
+
         {/* User catalogs */}
+        <div className="opds-section-label">
+          <Trans>My OPDS Catalogs</Trans>
+        </div>
         {userCatalogs.length > 0 ? (
           <>
-            <div className="opds-section-label">
-              <Trans>My OPDS Catalogs</Trans>
-            </div>
             {userCatalogs.map((catalog) => (
               <div key={catalog.id} className="cloud-drive-item">
                 <span

@@ -15,6 +15,7 @@ export interface OPDSLink {
   type: string;
   rel: string;
   title?: string;
+  templated?: boolean;
 }
 
 export interface OPDSEntry {
