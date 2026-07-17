@@ -49,7 +49,7 @@ class RuleEngineTest {
             {
               "bookSourceUrl": "https://books.example",
               "bookSourceName": "Library source",
-              "jsLib": "function sourceBase() { return 'https://library.example'; }",
+              "jsLib": "function sourceBase() { var saved = JSON.parse(source.getVariable()); return saved.url || 'https://library.example'; }",
               "searchUrl": "<js>sourceBase() + '/search?q=' + key</js>",
               "ruleSearch": {"bookList": "$.items"}
             }

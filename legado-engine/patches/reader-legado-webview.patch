@@ -26,6 +26,12 @@ diff --git a/src/main/java/io/legado/app/data/entities/BaseSource.kt b/src/main/
 index d17ea37..0f7aa3d 100644
 --- a/src/main/java/io/legado/app/data/entities/BaseSource.kt
 +++ b/src/main/java/io/legado/app/data/entities/BaseSource.kt
+@@ -153,4 +153,4 @@ interface BaseSource : JsExtensions {
+     fun getVariable(): String? {
+         var cacheInstance = CacheManager(getUserNameSpace())
+-        return cacheInstance.get("sourceVariable_${getKey()}")
++        return cacheInstance.get("sourceVariable_${getKey()}") ?: "{}"
+     }
 @@ -167,6 +167,8 @@ interface BaseSource : JsExtensions {
          bindings["baseUrl"] = getKey()
          bindings["cookie"] = CookieStore(getUserNameSpace())
