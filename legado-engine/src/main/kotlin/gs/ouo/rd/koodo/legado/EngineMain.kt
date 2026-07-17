@@ -137,6 +137,25 @@ private val dangerousScript = Regex(
         "unzipFile\\s*\\(|getTxtInFolder\\s*\\(|downloadFile\\s*\\()"
 )
 
+private val embeddedJavaScript = Regex("(?s)<js>(.*?)</js>")
+
+private fun normalizeEmbeddedRuleScripts(value: com.google.gson.JsonElement) {
+    when {
+        value.isJsonObject -> value.asJsonObject.entrySet().toList().forEach { (childKey, child) ->
+            if (childKey == "jsLib") return@forEach
+            if (child.isJsonPrimitive && child.asJsonPrimitive.isString) {
+                val raw = child.asString
+                if (raw.contains("<js>")) {
+                    value.asJsonObject.addProperty(childKey, embeddedJavaScript.replace(raw) { match ->
+                        "<js>${legadoCompatibleJavaScript(match.groupValues[1])}</js>"
+                    })
+                }
+            } else normalizeEmbeddedRuleScripts(child)
+        }
+        value.isJsonArray -> value.asJsonArray.forEach(::normalizeEmbeddedRuleScripts)
+    }
+}
+
 internal fun validateSource(raw: String): BookSource {
     if (dangerousScript.containsMatchIn(raw)) {
         throw IllegalArgumentException("source contains forbidden JVM access")
@@ -147,6 +166,7 @@ internal fun validateSource(raw: String): BookSource {
     val sourceJson = runCatching { gson.fromJson(raw, JsonObject::class.java) }
         .getOrNull()
         ?.also { root ->
+            normalizeEmbeddedRuleScripts(root)
             val modern = listOf("searchUrl", "ruleSearch", "ruleBookInfo", "ruleContent")
                 .any(root::has)
             if (modern && (!root.has("ruleToc") || root.get("ruleToc").isJsonNull)) {
