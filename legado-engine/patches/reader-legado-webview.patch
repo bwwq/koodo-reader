@@ -389,3 +389,15 @@ index 77b8231..4fc3419 100644
          @Suppress("BlockingMethodInNonBlockingContext")
          if (dataUriFindResult != null) {
              val dataUriBase64 = dataUriFindResult.groupValues[1]
+diff --git a/src/main/java/io/legado/app/model/webBook/BookInfo.kt b/src/main/java/io/legado/app/model/webBook/BookInfo.kt
+index 1b1d31f..94af81d 100644
+--- a/src/main/java/io/legado/app/model/webBook/BookInfo.kt
++++ b/src/main/java/io/legado/app/model/webBook/BookInfo.kt
+@@ -113,7 +113,7 @@ object BookInfo {
+             }
+             debugLog?.log(bookSource.bookSourceUrl, "└${book.intro}")
+-        } catch (e: Exception) {
++        } catch (e: Throwable) {
+             debugLog?.log(bookSource.bookSourceUrl, "└${e.localizedMessage}")
+         }
+         coroutineContext.ensureActive()
