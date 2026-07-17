@@ -234,9 +234,7 @@ private fun handleActions(exchange: HttpExchange) {
                 val loginScript = source.getLoginJs().orEmpty()
                 setSourceMessageSink { message -> job.message = message }
                 try {
-                    source.evalJS("${source.jsLib.orEmpty()}\n$loginScript\n${request.action}") {
-                        this["result"] = request.values
-                    }
+                    source.evalJS("$loginScript\n${request.action}") { this["result"] = request.values }
                 } finally {
                     source.removeLoginInfo()
                     setSourceMessageSink(null)

@@ -42,6 +42,24 @@ class RuleEngineTest {
     }
 
     @Test
+    fun retainsAndLoadsSourceJavaScriptLibrary() {
+        installSandbox()
+        val source = validateSource(
+            """
+            {
+              "bookSourceUrl": "https://books.example",
+              "bookSourceName": "Library source",
+              "jsLib": "function sourceBase() { return 'https://library.example'; }",
+              "searchUrl": "<js>sourceBase() + '/search?q=' + key</js>",
+              "ruleSearch": {"bookList": "$.items"}
+            }
+            """.trimIndent()
+        )
+
+        assertEquals("https://library.example", source.evalJS("sourceBase()"))
+    }
+
+    @Test
     fun searchesCssRulesWithKeywordPageAndHeaders() {
         installSandbox()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)

@@ -278,6 +278,24 @@ index 2cc200e..f41c96a 100644
      }
 
      override fun getSource(): BaseSource? {
+diff --git a/src/main/java/io/legado/app/utils/SourceAnalyzer.kt b/src/main/java/io/legado/app/utils/SourceAnalyzer.kt
+index 7f5b22c..cfa5791 100644
+--- a/src/main/java/io/legado/app/utils/SourceAnalyzer.kt
++++ b/src/main/java/io/legado/app/utils/SourceAnalyzer.kt
+@@ -176,4 +176,5 @@ object SourceAnalyzer {
+                 source.loginCheckJs = sourceAny.loginCheckJs
+                 source.bookSourceComment = sourceAny.bookSourceComment
++                source.jsLib = sourceAny.jsLib
+                 source.lastUpdateTime = sourceAny.lastUpdateTime
+                 source.respondTime = sourceAny.respondTime
+@@ -236,6 +237,7 @@ object SourceAnalyzer {
+         var loginUi: Any? = null,                       // 登录UI
+         var loginCheckJs: String? = null,               //登录检测js
+         var bookSourceComment: String? = "",            //书源注释
++        var jsLib: String? = null,                       // 书源公共 JavaScript
+         var lastUpdateTime: Long = 0,                   // 最后更新时间，用于排序
+         var respondTime: Long = 180000L,                // 响应时间，用于排序
+         var weight: Int = 0,                            // 智能排序的权重
 diff --git a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
 index 77b8231..4fc3419 100644
 --- a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
