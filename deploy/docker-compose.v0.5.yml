@@ -1,6 +1,6 @@
 services:
   service:
-    image: koodo-reader-service:0.4.0
+    image: koodo-reader-service:0.5.0
     container_name: koodo-reader-service
     restart: unless-stopped
     environment:
@@ -8,6 +8,7 @@ services:
       SERVICE_DB: /data/service.db
       SERVICE_FILES_DIR: /data/files
       LEGADO_ENGINE_URL: http://legado-engine:9080
+      SONOVEL_ENGINE_URL: http://sonovel-engine:7765
       LEGADO_ENGINE_TOKEN: ${LEGADO_ENGINE_TOKEN:?set LEGADO_ENGINE_TOKEN}
       BOOK_SOURCE_PRIVATE_HOSTS: ${BOOK_SOURCE_PRIVATE_HOSTS:-}
     volumes:
@@ -15,6 +16,8 @@ services:
     networks: [koodo]
     depends_on:
       legado-engine:
+        condition: service_healthy
+      sonovel-engine:
         condition: service_healthy
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
@@ -40,6 +43,31 @@ services:
     pids_limit: 256
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
+
+  sonovel-engine:
+    image: ghcr.io/freeok/sonovel:1.11.0
+    container_name: koodo-sonovel-engine
+    restart: unless-stopped
+    environment:
+      JAVA_OPTS: -Dmode=web -Xms64m -Xmx512m -XX:+ExitOnOutOfMemoryError
+    volumes:
+      - /opt/koodo-reader-service/sonovel/downloads:/sonovel/downloads
+      - /opt/koodo-reader-service/sonovel/logs:/sonovel/logs
+    networks: [koodo]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    cpus: 2
+    mem_limit: 768m
+    pids_limit: 256
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/7765'"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
 networks:
   koodo:

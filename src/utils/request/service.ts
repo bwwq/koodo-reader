@@ -19,6 +19,7 @@ export type ServiceCapability =
   | "storage.files"
   | "source.search"
   | "source.legado"
+  | "source.sonovel"
   | "storage.oauth";
 
 export interface ApiResponse<T> {

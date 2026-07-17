@@ -7,7 +7,7 @@ import {
 
 export interface BookSourceItem {
   id: string;
-  type: "opds" | "legado";
+  type: "opds" | "legado" | "sonovel";
   name: string;
   group?: string;
   url: string;
@@ -20,7 +20,7 @@ export interface SourceSearchResult {
   id: string;
   source_id: string;
   source_name: string;
-  source_type: "opds" | "legado";
+  source_type: "opds" | "legado" | "sonovel";
   title: string;
   authors: string[];
   summary?: string;

@@ -97,6 +97,7 @@ var builtInBookSources = []bookSource{
 	{ID: "builtin-project-gutenberg", Type: "opds", Name: "Project Gutenberg", URL: "https://www.gutenberg.org/ebooks.opds/", Enabled: true, BuiltIn: true, Searchable: true},
 	{ID: "builtin-internet-archive", Type: "opds", Name: "Internet Archive", URL: "https://archive.org/services/opds", Enabled: true, BuiltIn: true, Searchable: true},
 	{ID: "builtin-textos-info", Type: "opds", Name: "textos.info (Español)", URL: "https://www.textos.info/catalogo.atom", Enabled: true, BuiltIn: true, Searchable: true},
+	{ID: sonovelBuiltInID, Type: "sonovel", Name: "So Novel 中文聚合（11 个站点）", Group: "中文聚合", URL: "https://github.com/freeok/so-novel", Enabled: true, BuiltIn: true, Searchable: true},
 }
 
 func initBookSourceSchema() []string {
@@ -531,10 +532,17 @@ func loadSelectedSources(userID string, ids []string) ([]bookSource, error) {
 }
 
 func searchOneSource(ctx context.Context, userID string, source bookSource, keyword string, page int) ([]cachedSearchResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	timeout := 20 * time.Second
+	if source.Type == "sonovel" {
+		timeout = 60 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if source.Type == "legado" {
 		return searchLegado(ctx, userID, source, keyword, page)
+	}
+	if source.Type == "sonovel" {
+		return searchSoNovel(ctx, userID, source, keyword, page)
 	}
 	return searchOPDS(ctx, userID, source, keyword, page)
 }
@@ -786,6 +794,9 @@ func handleListBookSubscriptions(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item bookSubscription
 		if rows.Scan(&item.ID, &item.SourceID, &item.SourceName, &item.Title, &item.LastChapterCount, &item.LastChapter, &item.CheckedAt, &item.UpdatedAt) == nil {
+			if item.SourceID == sonovelBuiltInID {
+				item.SourceName = "So Novel 中文聚合"
+			}
 			items = append(items, item)
 		}
 	}
@@ -830,8 +841,30 @@ func checkBookSubscription(w http.ResponseWriter, r *http.Request, userID, id st
 	var definition, raw, title, sourceName, sourceID string
 	var previousCount int
 	var previousKey string
-	err := db.QueryRow(`SELECT s.source_id,s.title,s.raw_result,s.last_chapter_count,s.last_chapter_key,b.name,b.definition FROM book_source_subscriptions s JOIN book_sources b ON b.id=s.source_id AND b.user_id=s.user_id WHERE s.id=? AND s.user_id=? AND b.enabled=1`, id, userID).Scan(&sourceID, &title, &raw, &previousCount, &previousKey, &sourceName, &definition)
+	err := db.QueryRow(`SELECT s.source_id,s.title,s.raw_result,s.last_chapter_count,s.last_chapter_key,COALESCE(b.name,''),COALESCE(b.definition,'') FROM book_source_subscriptions s LEFT JOIN book_sources b ON b.id=s.source_id AND b.user_id=s.user_id AND b.enabled=1 WHERE s.id=? AND s.user_id=?`, id, userID).Scan(&sourceID, &title, &raw, &previousCount, &previousKey, &sourceName, &definition)
 	if err != nil {
+		writeAPI(w, 404, 404, "书源已停用或不存在", nil)
+		return
+	}
+	if sourceID == sonovelBuiltInID {
+		ctx, cancel := context.WithTimeout(r.Context(), 65*time.Second)
+		defer cancel()
+		current, updateAvailable, checkErr := checkSoNovelUpdate(ctx, raw, title, previousCount, previousKey)
+		if checkErr != nil {
+			writeAPI(w, 502, 502, "检查更新失败: "+checkErr.Error(), nil)
+			return
+		}
+		currentRaw, _ := json.Marshal(current)
+		now := time.Now().Unix()
+		_, _ = db.Exec(`UPDATE book_source_subscriptions SET raw_result=?,checked_at=? WHERE id=? AND user_id=?`, string(currentRaw), now, id, userID)
+		chapterCount := max(1, previousCount)
+		if updateAvailable {
+			chapterCount++
+		}
+		writeAPI(w, 200, 200, "检查完成", map[string]any{"id": id, "title": title, "source_name": "So Novel 中文聚合", "source_id": sourceID, "update_available": updateAvailable, "previous_count": previousCount, "chapter_count": chapterCount, "latest_chapter": current.LatestChapter})
+		return
+	}
+	if definition == "" {
 		writeAPI(w, 404, 404, "书源已停用或不存在", nil)
 		return
 	}
@@ -875,12 +908,18 @@ func checkBookSubscription(w http.ResponseWriter, r *http.Request, userID, id st
 func importBookSubscription(w http.ResponseWriter, userID, id string) {
 	var result cachedSearchResult
 	var raw string
-	err := db.QueryRow(`SELECT s.source_id,b.name,s.title,s.raw_result FROM book_source_subscriptions s JOIN book_sources b ON b.id=s.source_id AND b.user_id=s.user_id WHERE s.id=? AND s.user_id=? AND b.enabled=1`, id, userID).Scan(&result.SourceID, &result.SourceName, &result.Title, &raw)
+	err := db.QueryRow(`SELECT s.source_id,COALESCE(b.name,''),s.title,s.raw_result FROM book_source_subscriptions s LEFT JOIN book_sources b ON b.id=s.source_id AND b.user_id=s.user_id AND b.enabled=1 WHERE s.id=? AND s.user_id=?`, id, userID).Scan(&result.SourceID, &result.SourceName, &result.Title, &raw)
 	if err != nil {
 		writeAPI(w, 404, 404, "书源已停用或不存在", nil)
 		return
 	}
 	result.UserID, result.SourceType, result.Raw = userID, "legado", json.RawMessage(raw)
+	if result.SourceID == sonovelBuiltInID {
+		result.SourceName, result.SourceType = "So Novel 中文聚合", "sonovel"
+		var value sonovelResult
+		_ = json.Unmarshal([]byte(raw), &value)
+		result.DownloadURL, result.Latest = value.URL, value.LatestChapter
+	}
 	job, status, err := startImportJob(userID, result, id)
 	if err != nil {
 		writeAPI(w, status, status, err.Error(), nil)
@@ -906,7 +945,7 @@ func handleCreateBookImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subscriptionID := ""
-	if result.SourceType == "legado" {
+	if result.SourceType == "legado" || result.SourceType == "sonovel" {
 		var err error
 		subscriptionID, err = ensureBookSubscription(auth.User.ID, result)
 		if err != nil {
@@ -953,7 +992,7 @@ func startImportJob(userID string, result cachedSearchResult, subscriptionID str
 func ensureBookSubscription(userID string, result cachedSearchResult) (string, error) {
 	var fields map[string]any
 	_ = json.Unmarshal(result.Raw, &fields)
-	bookRef := firstNonEmpty(anyString(fields["bookUrl"]), anyString(fields["tocUrl"]), result.Title+"\n"+strings.Join(result.Authors, "\n"))
+	bookRef := firstNonEmpty(anyString(fields["bookUrl"]), anyString(fields["tocUrl"]), anyString(fields["url"]), result.Title+"\n"+strings.Join(result.Authors, "\n"))
 	fingerprint := tokenHash(result.SourceID + "\n" + bookRef)
 	var id string
 	err := db.QueryRow(`SELECT id FROM book_source_subscriptions WHERE user_id=? AND source_id=? AND book_fingerprint=?`, userID, result.SourceID, fingerprint).Scan(&id)
@@ -972,6 +1011,10 @@ func runImportJob(ctx context.Context, id, userID string, result cachedSearchRes
 	updateImportJob(id, "running", "preparing", 0, 0, "")
 	if result.SourceType == "opds" {
 		downloadOPDSJob(ctx, id, userID, result)
+		return
+	}
+	if result.SourceType == "sonovel" {
+		runSoNovelImport(ctx, id, userID, result)
 		return
 	}
 	var definition string

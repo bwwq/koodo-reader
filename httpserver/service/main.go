@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	serviceVersion       = "0.4.0"
+	serviceVersion       = "0.5.0"
 	accessTTL            = 15 * time.Minute
 	refreshTTL           = 30 * 24 * time.Hour
 	passwordRounds       = 120000
@@ -122,6 +122,9 @@ func serviceCapabilities() []string {
 	capabilities := []string{"sync.data", "sync.koreader", "storage.files", "source.search"}
 	if legadoEngineHealthy() {
 		capabilities = append(capabilities, "source.legado")
+	}
+	if sonovelEngineHealthy() {
+		capabilities = append(capabilities, "source.sonovel")
 	}
 	return capabilities
 }

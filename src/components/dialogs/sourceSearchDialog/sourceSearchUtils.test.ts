@@ -13,6 +13,15 @@ test("merges equal title and author while preserving source variants", () => {
   expect(groups[0].variants.map((item) => item.source_name)).toEqual(["One", "Two"]);
 });
 
+test("keeps So Novel result variants in merged search results", () => {
+  const groups = groupSourceResults([
+    { id: "a", source_id: "sonovel", source_name: "Source A", source_type: "sonovel", title: "同一本书", authors: ["作者"] },
+    { id: "b", source_id: "legado", source_name: "Source B", source_type: "legado", title: "同一本书", authors: ["作者"] },
+  ]);
+  expect(groups).toHaveLength(1);
+  expect(groups[0].variants.map((item) => item.source_type)).toEqual(["sonovel", "legado"]);
+});
+
 test("toggles individual source selection without changing other sources", () => {
   expect(toggleSourceSelection(["one", "two"], "one")).toEqual(["two"]);
   expect(toggleSourceSelection(["two"], "three")).toEqual(["two", "three"]);

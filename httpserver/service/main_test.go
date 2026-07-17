@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"mime/multipart"
 	"net"
 	"net/http"
@@ -111,6 +113,94 @@ func createInvites(t *testing.T, accessToken string, count int) []string {
 		codes = append(codes, raw.(string))
 	}
 	return codes
+}
+
+func TestSoNovelSearchAndImportStayBehindService(t *testing.T) {
+	openTestDatabase(t)
+	filesDir := t.TempDir()
+	t.Setenv("SERVICE_FILES_DIR", filesDir)
+
+	var mu sync.Mutex
+	generated := false
+	deleted := false
+	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sources":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 1, "name": "Test Source"}})
+		case "/search/aggregated":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"sourceId": 1, "sourceName": "Test Source", "url": "https://books.example/book/1",
+				"bookName": "测试书", "author": "作者", "latestChapter": "第十章",
+			}})
+		case "/local-books":
+			mu.Lock()
+			ready := generated
+			mu.Unlock()
+			if ready {
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "测试书(作者).epub", "size": 8, "timestamp": 2000}})
+			} else {
+				_ = json.NewEncoder(w).Encode([]any{})
+			}
+		case "/download-progress":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: {\"type\":\"download-progress\",\"index\":10,\"total\":10}\n\n")
+		case "/book-fetch":
+			if r.URL.Query().Get("url") != "https://books.example/book/1" {
+				t.Errorf("unexpected fetch URL: %s", r.URL.Query().Get("url"))
+			}
+			mu.Lock()
+			generated = true
+			mu.Unlock()
+		case "/book-download":
+			w.Header().Set("Content-Length", "8")
+			_, _ = io.WriteString(w, "PK EPUB!")
+		case "/book-delete":
+			mu.Lock()
+			deleted = true
+			mu.Unlock()
+			_, _ = io.WriteString(w, `{}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer engine.Close()
+	t.Setenv("SONOVEL_ENGINE_URL", engine.URL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	source := bookSource{ID: sonovelBuiltInID, Type: "sonovel", Name: "So Novel 中文聚合（11 个站点）"}
+	results, err := searchSoNovel(ctx, "user-a", source, "测试书", 1)
+	if err != nil || len(results) != 1 {
+		t.Fatalf("search So Novel: %v %#v", err, results)
+	}
+	if results[0].SourceName != "Test Source" || results[0].DownloadURL != "https://books.example/book/1" {
+		t.Fatalf("unexpected normalized result: %#v", results[0])
+	}
+
+	registerAccount(t, "sonovel-admin", "password-123", "")
+	var userID string
+	if err := db.QueryRow(`SELECT id FROM users WHERE username=?`, "sonovel-admin").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	if _, err := db.Exec(`INSERT INTO book_import_jobs(id,user_id,source_id,source_type,status,stage,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)`, "sonovel-job", userID, sonovelBuiltInID, "sonovel", "running", "preparing", now, now, now+3600); err != nil {
+		t.Fatal(err)
+	}
+	runSoNovelImport(ctx, "sonovel-job", userID, results[0])
+	job, err := readImportJob(userID, "sonovel-job", false)
+	if err != nil || job.Status != "ready" || !job.Ready {
+		t.Fatalf("So Novel job not ready: %v %#v", err, job)
+	}
+	data, err := os.ReadFile(filepath.Join(filesDir, "generated", userID, "sonovel-job-测试书.epub"))
+	if err != nil || string(data) != "PK EPUB!" {
+		t.Fatalf("generated EPUB mismatch: %v %q", err, data)
+	}
+	mu.Lock()
+	wasDeleted := deleted
+	mu.Unlock()
+	if !wasDeleted {
+		t.Fatal("transient So Novel file was not deleted")
+	}
 }
 
 func TestCORSOnlyAllowsSameHostOrConfiguredOrigin(t *testing.T) {

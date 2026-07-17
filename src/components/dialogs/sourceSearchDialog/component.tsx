@@ -33,7 +33,7 @@ interface Props {
   t: (key: string) => string;
 }
 
-const LAST_SELECTION_KEY = "source-search-selected-v1";
+const LAST_SELECTION_KEY = "source-search-selected-v2";
 
 const stageLabels: Record<string, string> = {
   queued: "等待处理",
@@ -46,6 +46,12 @@ const stageLabels: Record<string, string> = {
   ready: "导入完成",
   failed: "任务失败",
   cancelled: "已取消",
+};
+
+const sourceTypeLabels: Record<string, string> = {
+  opds: "OPDS",
+  legado: "阅读书源",
+  sonovel: "中文聚合",
 };
 
 function SourceSearchDialog(props: Props) {
@@ -313,7 +319,7 @@ function SourceSearchDialog(props: Props) {
                 <div className={`source-row ${source.enabled ? "" : "disabled"}`} key={source.id}>
                   <label>
                     <input type="checkbox" checked={selected.includes(source.id)} disabled={!source.enabled} onChange={() => toggleSource(source.id)} />
-                    <span><b>{source.name}</b><small>{source.type.toUpperCase()}{source.group ? ` · ${source.group}` : ""}</small></span>
+                    <span><b>{source.name}</b><small>{sourceTypeLabels[source.type] || source.type}{source.group ? ` · ${source.group}` : ""}</small></span>
                   </label>
                   <em className={sourceStatus[source.id]?.includes("失败") ? "error" : ""}>{sourceStatus[source.id] || ""}</em>
                   {!source.built_in && (
@@ -355,7 +361,7 @@ function SourceSearchDialog(props: Props) {
                   {group.variants.map((variant) => (
                     <button key={variant.id} onClick={() => startImport(variant)} disabled={!!job}>
                       <span>{variant.source_name}</span>
-                      <small>{variant.latest_chapter || variant.format?.toUpperCase() || (variant.source_type === "legado" ? "生成 EPUB" : "下载")}</small>
+                      <small>{variant.latest_chapter || variant.format?.toUpperCase() || (variant.source_type === "opds" ? "下载" : "生成 EPUB")}</small>
                     </button>
                   ))}
                 </div>
