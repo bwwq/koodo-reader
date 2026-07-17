@@ -58,7 +58,8 @@ private val allowedScriptClasses = listOf(
     "java.util.ArrayList",
     "java.util.HashMap",
     "java.util.LinkedHashMap",
-    "java.util.LinkedHashSet"
+    "java.util.LinkedHashSet",
+    "org.mozilla.javascript.ConsString"
 )
 
 fun installSandbox() {
