@@ -35,6 +35,12 @@ type sonovelLocalBook struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+type sonovelResponse struct {
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
+}
+
 func sonovelEngineURL() string {
 	return strings.TrimRight(env("SONOVEL_ENGINE_URL", "http://sonovel-engine:7765"), "/")
 }
@@ -99,7 +105,7 @@ func fetchSoNovelResults(ctx context.Context, keyword string) ([]sonovelResult, 
 		return nil, fmt.Errorf("So Novel 返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
 	}
 	var values []sonovelResult
-	if json.NewDecoder(io.LimitReader(resp.Body, 10<<20)).Decode(&values) != nil {
+	if decodeSoNovelResponse(resp.Body, 10<<20, &values) != nil {
 		return nil, errors.New("So Novel 搜索响应无效")
 	}
 	return values, nil
@@ -175,10 +181,22 @@ func listSoNovelBooks(ctx context.Context) ([]sonovelLocalBook, error) {
 		return nil, fmt.Errorf("读取 So Novel 文件失败: HTTP %d", resp.StatusCode)
 	}
 	var values []sonovelLocalBook
-	if json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&values) != nil {
+	if decodeSoNovelResponse(resp.Body, 2<<20, &values) != nil {
 		return nil, errors.New("So Novel 文件列表无效")
 	}
 	return values, nil
+}
+
+func decodeSoNovelResponse(body io.Reader, limit int64, target any) error {
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil || int64(len(data)) > limit {
+		return errors.New("So Novel 响应过大或读取失败")
+	}
+	var response sonovelResponse
+	if json.Unmarshal(data, &response) != nil || response.Code != http.StatusOK || len(response.Data) == 0 {
+		return errors.New("So Novel 响应无效")
+	}
+	return json.Unmarshal(response.Data, target)
 }
 
 func newestSoNovelBook(values []sonovelLocalBook, previous map[string]int64) sonovelLocalBook {

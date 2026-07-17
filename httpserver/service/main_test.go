@@ -126,20 +126,20 @@ func TestSoNovelSearchAndImportStayBehindService(t *testing.T) {
 	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/sources":
-			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 1, "name": "Test Source"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "message": "OK", "data": []map[string]any{{"id": 1, "name": "Test Source"}}})
 		case "/search/aggregated":
-			_ = json.NewEncoder(w).Encode([]map[string]any{{
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "message": "OK", "data": []map[string]any{{
 				"sourceId": 1, "sourceName": "Test Source", "url": "https://books.example/book/1",
 				"bookName": "测试书", "author": "作者", "latestChapter": "第十章",
-			}})
+			}}})
 		case "/local-books":
 			mu.Lock()
 			ready := generated
 			mu.Unlock()
 			if ready {
-				_ = json.NewEncoder(w).Encode([]map[string]any{{"name": "测试书(作者).epub", "size": 8, "timestamp": 2000}})
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "message": "OK", "data": []map[string]any{{"name": "测试书(作者).epub", "size": 8, "timestamp": 2000}}})
 			} else {
-				_ = json.NewEncoder(w).Encode([]any{})
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "message": "OK", "data": []any{}})
 			}
 		case "/download-progress":
 			w.Header().Set("Content-Type", "text/event-stream")
