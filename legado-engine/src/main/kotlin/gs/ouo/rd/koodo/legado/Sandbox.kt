@@ -138,6 +138,36 @@ private class SafeWrapFactory : WrapFactory() {
 
 private val safeWrapFactory = SafeWrapFactory()
 
+internal fun legadoCompatibleJavaScript(script: String): String {
+    var compatible = script.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
+    var destructuringIndex = 0
+    compatible = Regex("(?ms)^([ \\t]*)var\\s*\\{([^{}]+)}\\s*=\\s*([^;]+);").replace(compatible) { match ->
+        val indent = match.groupValues[1]
+        val source = "__legado_destructure_${destructuringIndex++}"
+        val declarations = match.groupValues[2].split(',').mapNotNull { raw ->
+            val field = raw.trim()
+            if (field.isEmpty()) return@mapNotNull null
+            val pair = field.split(':', limit = 2).map(String::trim)
+            val property = pair[0]
+            val target = pair.getOrElse(1) { property }
+            if (!property.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*")) ||
+                !target.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*"))) return@mapNotNull null
+            "$indent" + "var $target = $source.$property;"
+        }
+        "$indent" + "var $source = ${match.groupValues[3].trim()};\n" + declarations.joinToString("\n")
+    }
+    compatible = Regex("(=\\s*\\{)([^{}]*)(})").replace(compatible) { match ->
+        val fields = match.groupValues[2].split(',').map { raw ->
+            val trimmed = raw.trim()
+            if (trimmed.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*"))) {
+                raw.replace(trimmed, "$trimmed: $trimmed")
+            } else raw
+        }
+        match.groupValues[1] + fields.joinToString(",") + match.groupValues[3]
+    }
+    return compatible
+}
+
 private fun configureRhinoContext(context: Context, shutter: ClassShutter) {
     // Legado sources commonly use ES6 syntax such as template literals,
     // destructuring and object-property shorthand. Rhino otherwise inherits

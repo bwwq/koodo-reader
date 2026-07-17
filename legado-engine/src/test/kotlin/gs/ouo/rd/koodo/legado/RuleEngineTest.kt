@@ -66,14 +66,34 @@ class RuleEngineTest {
         assertEquals(
             "book-7:author-9",
             source.evalJS(
-                "const name = 'book-7'; const author = 'author-9'; " +
-                    "const payload = { name, author }; " +
-                    "const { name: parsedName, author: parsedAuthor } = payload; " +
-                    "`${'$'}{parsedName}:${'$'}{parsedAuthor}`"
+                """
+                const name = 'book-7';
+                const author = 'author-9';
+                const payload = { name, author };
+                const { name: parsedName, author: parsedAuthor } = payload;
+                `${'$'}{parsedName}:${'$'}{parsedAuthor}`
+                """.trimIndent()
             ).toString()
         )
         assertEquals("", source.evalJS("cookie.getCookie('https://books.example')"))
         assertEquals(true, source.evalJS("typeof cache.get == 'function' && typeof cache.put == 'function'"))
+    }
+
+    @Test
+    fun convertsCommonModernSourceSyntaxForPinnedRhino() {
+        val converted = legadoCompatibleJavaScript(
+            """
+            const result = { source: 'source-1', book_id: 'book-2' };
+            const { source:sources, book_id } = result;
+            let catalog = {
+                sources,
+                book_id,
+            };
+            """.trimIndent()
+        )
+        assertFalse(converted.contains("{ source:sources, book_id }"))
+        assertTrue(converted.contains("sources: sources"))
+        assertTrue(converted.contains("book_id: book_id"))
     }
 
     @Test
