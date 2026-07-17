@@ -38,8 +38,8 @@ index d17ea37..0f7aa3d 100644
          bindings["cache"] = CacheManager(getUserNameSpace())
 -        return AppConst.SCRIPT_ENGINE.eval(jsStr, bindings)
 +        val library = (this as? BookSource)?.jsLib
-+        val script = if (library.isNullOrBlank()) jsStr else
-+            "(function(){\n$library\nreturn eval(${GSON.toJson(jsStr)});\n}).call(this)"
++        val compatibleLibrary = library?.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
++        val script = if (compatibleLibrary.isNullOrBlank()) jsStr else "$compatibleLibrary\n$jsStr"
 +        return AppConst.SCRIPT_ENGINE.eval(script, bindings)
      }
 -}
@@ -280,8 +280,8 @@ index 2cc200e..f41c96a 100644
          bindings["nextChapterUrl"] = nextChapterUrl
 -        return SCRIPT_ENGINE.eval(jsStr, bindings)
 +        val library = (source as? io.legado.app.data.entities.BookSource)?.jsLib
-+        val script = if (library.isNullOrBlank()) jsStr else
-+            "(function(){\n$library\nreturn eval(${GSON.toJson(jsStr)});\n}).call(this)"
++        val compatibleLibrary = library?.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
++        val script = if (compatibleLibrary.isNullOrBlank()) jsStr else "$compatibleLibrary\n$jsStr"
 +        return SCRIPT_ENGINE.eval(script, bindings)
      }
 
@@ -314,8 +314,8 @@ index 77b8231..4fc3419 100644
          bindings["result"] = result
 -        return SCRIPT_ENGINE.eval(jsStr, bindings)
 +        val library = (source as? io.legado.app.data.entities.BookSource)?.jsLib
-+        val script = if (library.isNullOrBlank()) jsStr else
-+            "(function(){\n$library\nreturn eval(${GSON.toJson(jsStr)});\n}).call(this)"
++        val compatibleLibrary = library?.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
++        val script = if (compatibleLibrary.isNullOrBlank()) jsStr else "$compatibleLibrary\n$jsStr"
 +        return SCRIPT_ENGINE.eval(script, bindings)
      }
 
