@@ -221,25 +221,60 @@ const parseResponse = async <T>(response: Response): Promise<ApiResponse<T>> => 
   return { code: 200, msg: "success", data: body as T };
 };
 
-const refreshSession = async (): Promise<boolean> => {
+const performSessionRefresh = async (): Promise<boolean> => {
+  const baseUrl = getServiceBaseUrl();
+  const refreshToken = await TokenService.getToken(REFRESH_TOKEN_KEY);
+  if (!baseUrl || !refreshToken) return false;
+  try {
+    const response = await fetch(baseUrl + "/v1/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    const result = await parseResponse<TokenPayload>(response);
+    if (result.code !== 200 || !result.data?.access_token) {
+      const latestRefreshToken = await TokenService.getToken(REFRESH_TOKEN_KEY);
+      return Boolean(latestRefreshToken && latestRefreshToken !== refreshToken);
+    }
+    await saveSession(result.data);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const refreshSession = async (force = false): Promise<boolean> => {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
-    const baseUrl = getServiceBaseUrl();
-    const refreshToken = await TokenService.getToken(REFRESH_TOKEN_KEY);
-    if (!baseUrl || !refreshToken) return false;
-    try {
-      const response = await fetch(baseUrl + "/v1/auth/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-      const result = await parseResponse<TokenPayload>(response);
-      if (result.code !== 200 || !result.data?.access_token) return false;
-      await saveSession(result.data);
-      return true;
-    } catch {
-      return false;
+    const initialAccessToken = await TokenService.getToken(ACCESS_TOKEN_KEY);
+    const initialRefreshToken = await TokenService.getToken(REFRESH_TOKEN_KEY);
+    const refresh = async () => {
+      const currentAccessToken = await TokenService.getToken(ACCESS_TOKEN_KEY);
+      const currentRefreshToken = await TokenService.getToken(REFRESH_TOKEN_KEY);
+      if (
+        (currentAccessToken && currentAccessToken !== initialAccessToken) ||
+        (currentRefreshToken && currentRefreshToken !== initialRefreshToken)
+      ) {
+        return true;
+      }
+      const expiresAt = Number(
+        (await TokenService.getToken(TOKEN_EXPIRES_KEY)) || "0"
+      );
+      if (
+        !force &&
+        currentAccessToken &&
+        (!expiresAt || expiresAt >= Date.now() + 30_000)
+      ) {
+        return true;
+      }
+      return performSessionRefresh();
+    };
+    const locks =
+      typeof navigator !== "undefined" ? (navigator as any).locks : null;
+    if (locks?.request) {
+      return locks.request("koodo-service-session-refresh", refresh);
     }
+    return refresh();
   })().finally(() => {
     refreshPromise = null;
   });
@@ -290,12 +325,25 @@ export const serviceRequest = async <T>(
       authenticated &&
       (response.status === 401 || result.code === 401) &&
       options.retryAuth !== false &&
-      (await refreshSession())
+      (await refreshSession(true))
     ) {
       return serviceRequest<T>(path, { ...options, retryAuth: false });
     }
     if (authenticated && (response.status === 401 || result.code === 401)) {
-      await clearServiceSession();
+      const latestAccessToken = await TokenService.getToken(ACCESS_TOKEN_KEY);
+      const requestAccessToken = headers
+        .get("Authorization")
+        ?.replace(/^Bearer\s+/i, "");
+      if (
+        options.retryAuth !== false &&
+        latestAccessToken &&
+        latestAccessToken !== requestAccessToken
+      ) {
+        return serviceRequest<T>(path, { ...options, retryAuth: false });
+      }
+      if (!latestAccessToken || latestAccessToken === requestAccessToken) {
+        await clearServiceSession();
+      }
     }
     return result;
   } catch (error) {
@@ -332,20 +380,29 @@ export const serviceStream = async (
   }
   const run = async (retry: boolean): Promise<ApiResponse<null>> => {
     try {
+      const requestAccessToken = await getServiceAccessToken();
       const response = await fetch(baseUrl + path, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
-          Authorization: `Bearer ${await getServiceAccessToken()}`,
+          Authorization: `Bearer ${requestAccessToken}`,
         },
         body: JSON.stringify(body),
       });
-      if (response.status === 401 && retry && (await refreshSession())) {
+      if (response.status === 401 && retry && (await refreshSession(true))) {
         return run(false);
       }
       if (!response.ok || !response.body) {
-        if (response.status === 401) await clearServiceSession();
+        if (response.status === 401) {
+          const latestAccessToken = await TokenService.getToken(ACCESS_TOKEN_KEY);
+          if (retry && latestAccessToken !== requestAccessToken) {
+            return run(false);
+          }
+          if (!latestAccessToken || latestAccessToken === requestAccessToken) {
+            await clearServiceSession();
+          }
+        }
         return emptyResponse<null>(response.status, response.statusText);
       }
       const reader = response.body.getReader();

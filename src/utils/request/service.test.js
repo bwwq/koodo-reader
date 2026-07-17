@@ -124,4 +124,34 @@ describe("online service isolation", () => {
     expect(requestHeaders.get("Authorization")).toBe("Bearer renewed-access");
     expect(mockTokens.service_access_token).toBe("renewed-access");
   });
+
+  it("does not clear a newer access token when an older request returns 401", async () => {
+    mockConfigItems.serviceBaseUrl = "https://reader.example.com";
+    mockTokens.service_access_token = "old-access";
+    global.fetch
+      .mockImplementationOnce(async () => {
+        mockTokens.service_access_token = "new-access-from-another-tab";
+        return {
+          ok: false,
+          status: 401,
+          statusText: "Unauthorized",
+          json: async () => ({ code: 401, msg: "expired" }),
+        };
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ code: 200, msg: "success", data: [] }),
+      });
+
+    await expect(
+      serviceRequest("/v1/book-sources", { method: "GET" })
+    ).resolves.toMatchObject({ code: 200, data: [] });
+    expect(mockTokens.service_access_token).toBe("new-access-from-another-tab");
+    const retryHeaders = global.fetch.mock.calls[1][1].headers;
+    expect(retryHeaders.get("Authorization")).toBe(
+      "Bearer new-access-from-another-tab"
+    );
+  });
 });
