@@ -32,13 +32,14 @@ index d17ea37..0f7aa3d 100644
 -        return cacheInstance.get("sourceVariable_${getKey()}")
 +        return cacheInstance.get("sourceVariable_${getKey()}") ?: "{}"
      }
-@@ -167,6 +167,8 @@ interface BaseSource : JsExtensions {
+@@ -167,6 +167,9 @@ interface BaseSource : JsExtensions {
          bindings["baseUrl"] = getKey()
          bindings["cookie"] = CookieStore(getUserNameSpace())
          bindings["cache"] = CacheManager(getUserNameSpace())
 -        return AppConst.SCRIPT_ENGINE.eval(jsStr, bindings)
 +        val library = (this as? BookSource)?.jsLib
-+        val script = if (library.isNullOrBlank()) jsStr else "$library\n$jsStr"
++        val script = if (library.isNullOrBlank()) jsStr else
++            "(function(){\n$library\nreturn eval(${GSON.toJson(jsStr)});\n}).call(this)"
 +        return AppConst.SCRIPT_ENGINE.eval(script, bindings)
      }
 -}
@@ -273,13 +274,14 @@ diff --git a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt b/src/
 index 2cc200e..f41c96a 100644
 --- a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt
 +++ b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt
-@@ -659,7 +659,9 @@ class AnalyzeRule(
+@@ -659,7 +659,10 @@ class AnalyzeRule(
          bindings["title"] = chapter?.title
          bindings["src"] = content
          bindings["nextChapterUrl"] = nextChapterUrl
 -        return SCRIPT_ENGINE.eval(jsStr, bindings)
 +        val library = (source as? io.legado.app.data.entities.BookSource)?.jsLib
-+        val script = if (library.isNullOrBlank()) jsStr else "$library\n$jsStr"
++        val script = if (library.isNullOrBlank()) jsStr else
++            "(function(){\n$library\nreturn eval(${GSON.toJson(jsStr)});\n}).call(this)"
 +        return SCRIPT_ENGINE.eval(script, bindings)
      }
 
@@ -306,13 +308,14 @@ diff --git a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt b/src/m
 index 77b8231..4fc3419 100644
 --- a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
 +++ b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
-@@ -250,7 +250,9 @@ class AnalyzeUrl(
+@@ -250,7 +250,10 @@ class AnalyzeUrl(
          bindings["book"] = ruleData as? Book
          bindings["source"] = source
          bindings["result"] = result
 -        return SCRIPT_ENGINE.eval(jsStr, bindings)
 +        val library = (source as? io.legado.app.data.entities.BookSource)?.jsLib
-+        val script = if (library.isNullOrBlank()) jsStr else "$library\n$jsStr"
++        val script = if (library.isNullOrBlank()) jsStr else
++            "(function(){\n$library\nreturn eval(${GSON.toJson(jsStr)});\n}).call(this)"
 +        return SCRIPT_ENGINE.eval(script, bindings)
      }
 

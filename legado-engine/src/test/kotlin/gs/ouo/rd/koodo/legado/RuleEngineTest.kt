@@ -83,8 +83,9 @@ class RuleEngineTest {
             val source = BookSource(
                 bookSourceUrl = base,
                 bookSourceName = "Fixed test source",
+                jsLib = "const searchBase = '$base';",
                 header = "{\"X-Source-Test\":\"engine-test\"}",
-                searchUrl = "$base/search?key={{key}}&page={{page}}",
+                searchUrl = "<js>searchBase + '/search?key={{key}}&page={{page}}'</js>",
                 ruleSearch = SearchRule(
                     bookList = ".book",
                     name = "h2@text",
