@@ -669,7 +669,9 @@ internal fun normalizeChapterContent(raw: String): String {
     val clean = Jsoup.clean(
         raw,
         "",
-        Safelist.relaxed().removeTags("script", "style", "iframe", "object", "embed"),
+        Safelist.relaxed()
+            .removeTags("script", "style", "iframe", "object", "embed")
+            .preserveRelativeLinks(true),
         org.jsoup.nodes.Document.OutputSettings().prettyPrint(false)
     )
     if (clean.isBlank()) return "<p></p>"

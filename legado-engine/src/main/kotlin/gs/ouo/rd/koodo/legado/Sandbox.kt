@@ -67,24 +67,46 @@ fun installSandbox() {
             if (allowed.endsWith('.')) name.startsWith(allowed) else name == allowed
         }
     }
-    ContextFactory.initGlobal(SandboxContextFactory(shutter))
-    Class.forName("com.script.javascript.RhinoScriptEngine")
-    ReaderAdapterHelper.setAdapter(IsolatedAdapter(File(dataDir, "runtime")))
+    try {
+        try {
+            ContextFactory.initGlobal(SandboxContextFactory(shutter))
+        } catch (_: IllegalStateException) {
+            // Some upstream entity initializers touch Rhino before the engine
+            // bootstrap. Harden every subsequently-created context in that case.
+            ContextFactory.getGlobal().addListener(SandboxContextListener(shutter))
+        }
+        Class.forName("com.script.javascript.RhinoScriptEngine")
+        ReaderAdapterHelper.setAdapter(IsolatedAdapter(File(dataDir, "runtime")))
+    } catch (error: Throwable) {
+        sandboxInstalled.set(false)
+        throw error
+    }
 }
 
 private class SandboxContextFactory(private val shutter: ClassShutter) : ContextFactory() {
-    override fun makeContext(): Context = super.makeContext().apply {
-        optimizationLevel = -1
-        instructionObserverThreshold = 10_000
-        setClassShutter(shutter)
-        putThreadLocal(rhinoDeadlineKey, System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(scriptDeadlineMillis.get() ?: 30_000L))
-    }
+    override fun makeContext(): Context = super.makeContext().also { configureRhinoContext(it, shutter) }
 
     override fun observeInstructionCount(context: Context, instructionCount: Int) {
         val deadline = context.getThreadLocal(rhinoDeadlineKey) as? Long ?: return
         if (System.nanoTime() > deadline) throw EvaluatorException("JavaScript execution timed out")
     }
 
+}
+
+private class SandboxContextListener(private val shutter: ClassShutter) : ContextFactory.Listener {
+    override fun contextCreated(context: Context) = configureRhinoContext(context, shutter)
+
+    override fun contextReleased(context: Context) = Unit
+}
+
+private fun configureRhinoContext(context: Context, shutter: ClassShutter) {
+    context.optimizationLevel = -1
+    context.instructionObserverThreshold = 10_000
+    context.setClassShutter(shutter)
+    context.putThreadLocal(
+        rhinoDeadlineKey,
+        System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(scriptDeadlineMillis.get() ?: 30_000L)
+    )
 }
 
 private class IsolatedAdapter(private val root: File) : ReaderAdapterInterface {
