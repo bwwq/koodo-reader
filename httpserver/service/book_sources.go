@@ -32,19 +32,19 @@ const (
 )
 
 type bookSource struct {
-	ID            string         `json:"id"`
-	Type          string         `json:"type"`
-	Name          string         `json:"name"`
-	Group         string         `json:"group,omitempty"`
-	URL           string         `json:"url"`
-	Enabled       bool           `json:"enabled"`
-	BuiltIn       bool           `json:"built_in,omitempty"`
-	Searchable    bool           `json:"searchable"`
+	ID            string          `json:"id"`
+	Type          string          `json:"type"`
+	Name          string          `json:"name"`
+	Group         string          `json:"group,omitempty"`
+	URL           string          `json:"url"`
+	Enabled       bool            `json:"enabled"`
+	BuiltIn       bool            `json:"built_in,omitempty"`
+	Searchable    bool            `json:"searchable"`
 	Definition    json.RawMessage `json:"-"`
-	UpdatedAt     int64          `json:"updated_at,omitempty"`
-	Features      []string       `json:"features,omitempty"`
-	Compatibility map[string]any `json:"compatibility,omitempty"`
-	LoginState    string         `json:"login_state,omitempty"`
+	UpdatedAt     int64           `json:"updated_at,omitempty"`
+	Features      []string        `json:"features,omitempty"`
+	Compatibility map[string]any  `json:"compatibility,omitempty"`
+	LoginState    string          `json:"login_state,omitempty"`
 }
 
 type cachedSearchResult struct {

@@ -82,7 +82,9 @@ func webviewRequest(ctx context.Context, method, path string, value any, output 
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		var problem struct{ Error string `json:"error"` }
+		var problem struct {
+			Error string `json:"error"`
+		}
 		_ = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&problem)
 		if problem.Error == "" {
 			problem.Error = fmt.Sprintf("WebView HTTP %d", response.StatusCode)

@@ -103,7 +103,7 @@ index e176ea4..7141cc2 100644
 
  /**
   * js扩展类, 在js中通过java变量调用
-@@ -113,13 +114,86 @@ interface JsExtensions {
+@@ -113,13 +114,84 @@ interface JsExtensions {
       * @return 返回js获取的内容
       */
      fun webView(html: String?, url: String?, js: String?): String? {
@@ -153,8 +153,6 @@ index e176ea4..7141cc2 100644
 +    fun getFromMemory(key: String): String =
 +        CacheManager(getUserNameSpace()).get("memory_${md5Encode16(getSource()?.getKey() ?: "source")}_$key") ?: ""
 +
-+    fun androidId(): String = stableDeviceId("android")
-+
 +    fun deviceID(): String = stableDeviceId("device")
 +
 +    fun getAppVariant(): String = "release"
@@ -191,7 +189,7 @@ index e176ea4..7141cc2 100644
          val result = when {
              path.startsWith("http") -> cacheFile(path) ?: ""
              path.startsWith("/storage") -> FileUtils.readText(path)
-@@ -176,19 +250,7 @@ interface JsExtensions {
+@@ -176,19 +248,7 @@ interface JsExtensions {
       * @return 相对路径
       */
      fun downloadFile(content: String, url: String): String {
@@ -212,7 +210,7 @@ index e176ea4..7141cc2 100644
      }
 
      /**
-@@ -348,13 +410,7 @@ interface JsExtensions {
+@@ -348,13 +408,7 @@ interface JsExtensions {
       * @return File
       */
      fun getFile(path: String): File {
@@ -227,7 +225,7 @@ index e176ea4..7141cc2 100644
      }
 
      fun readFile(path: String): ByteArray? {
-@@ -509,7 +565,7 @@ interface JsExtensions {
+@@ -509,7 +563,7 @@ interface JsExtensions {
                  }
                  return@runBlocking x
              }
@@ -236,7 +234,7 @@ index e176ea4..7141cc2 100644
              else -> base64DecodeToByteArray(str)
          }
          font ?: return null
-@@ -544,6 +600,7 @@ interface JsExtensions {
+@@ -544,6 +598,7 @@ interface JsExtensions {
       * 弹窗提示
       */
      fun toast(msg: Any?) {
@@ -244,7 +242,7 @@ index e176ea4..7141cc2 100644
          Debug.log("toast: " + msg.toString())
      }
 
-@@ -551,6 +608,7 @@ interface JsExtensions {
+@@ -551,6 +606,7 @@ interface JsExtensions {
       * 弹窗提示 停留时间较长
       */
      fun longToast(msg: Any?) {
@@ -252,13 +250,18 @@ index e176ea4..7141cc2 100644
          Debug.log("longToast: " + msg.toString())
      }
 
-@@ -558,6 +616,7 @@ interface JsExtensions {
+@@ -558,6 +614,7 @@ interface JsExtensions {
       * 输出调试日志
       */
      fun log(msg: String): String {
 +        ReaderAdapterHelper.getAdapter().reportMessage(msg)
          Debug.log(msg)
          return msg
+     }
+@@ -734,3 +791,3 @@ interface JsExtensions {
+     fun androidId(): String {
+-        return ""
++        return stableDeviceId("android")
      }
 diff --git a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt
 index 2cc200e..f41c96a 100644
