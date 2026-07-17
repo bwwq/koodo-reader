@@ -98,6 +98,8 @@ class RuleEngineTest {
         assertFalse(converted.contains("let "))
         assertTrue(converted.contains("var sources = __legado_destructure_0[\"source\"]"))
         assertTrue(converted.contains("var book_id = __legado_destructure_0[\"book_id\"]"))
+        assertTrue(converted.contains("catalog[\"sources\"] = sources"))
+        assertTrue(converted.contains("catalog[\"book_id\"] = book_id"))
     }
 
     @Test

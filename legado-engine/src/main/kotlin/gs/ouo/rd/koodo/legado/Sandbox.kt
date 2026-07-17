@@ -160,6 +160,17 @@ internal fun legadoCompatibleJavaScript(script: String, convertObjectShorthand: 
         "$indent" + "var $source = ${match.groupValues[3].trim()};\n" + declarations.joinToString("\n")
     }
     if (!convertObjectShorthand) return compatible
+    compatible = Regex("(?m)(var\\s+([A-Za-z_$][A-Za-z0-9_$]*)\\s*)=\\s*\\{([^{}]*)}").replace(compatible) { match ->
+        val name = match.groupValues[2]
+        val fields = match.groupValues[3].split(',').map(String::trim).filter(String::isNotEmpty)
+        if (fields.isEmpty() || fields.any { !it.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*")) }) {
+            match.value
+        } else {
+            match.groupValues[1] + "= {};\n" + fields.joinToString("\n") { field ->
+                "$name[\"$field\"] = $field;"
+            }
+        }
+    }
     return Regex("(=\\s*\\{)([^{}]*)(})").replace(compatible) { match ->
         val rawFields = match.groupValues[2].split(',')
         val fields = rawFields.mapIndexedNotNull { index, raw ->
