@@ -320,7 +320,15 @@ index 77b8231..4fc3419 100644
      }
 
      fun put(key: String, value: String): String {
-@@ -474,5 +477,5 @@ class AnalyzeUrl(
+@@ -351,5 +354,6 @@ class AnalyzeUrl(
+         if (type != null) {
+-            return StrResponse(url, StringUtils.byteToHexString(getByteArrayAwait()))
++            val responseUrl = url.takeIf { it.isAbsUrl() } ?: baseUrl.takeIf { it.isAbsUrl() } ?: "https://legado.invalid/data"
++            return StrResponse(responseUrl, StringUtils.byteToHexString(getByteArrayAwait()))
+         }
+         val concurrentRecord = fetchStart()
+         setCookie(source?.getKey())
+@@ -474,5 +478,5 @@ class AnalyzeUrl(
          @Suppress("RegExpRedundantEscape")
 -        val dataUriFindResult = dataUriRegex.find(urlNoQuery)
 +        val dataUriFindResult = dataUriRegex.find(urlNoQuery.replace("\r", "").replace("\n", ""))
