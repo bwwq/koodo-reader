@@ -156,15 +156,6 @@ internal fun legadoCompatibleJavaScript(script: String): String {
         }
         "$indent" + "var $source = ${match.groupValues[3].trim()};\n" + declarations.joinToString("\n")
     }
-    compatible = Regex("(=\\s*\\{)([^{}]*)(})").replace(compatible) { match ->
-        val fields = match.groupValues[2].split(',').map { raw ->
-            val trimmed = raw.trim()
-            if (trimmed.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*"))) {
-                raw.replace(trimmed, "$trimmed: $trimmed")
-            } else raw
-        }
-        match.groupValues[1] + fields.joinToString(",") + match.groupValues[3]
-    }
     return compatible
 }
 

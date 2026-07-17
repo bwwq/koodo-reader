@@ -95,8 +95,8 @@ class RuleEngineTest {
         assertFalse(converted.contains("{ source:sources, book_id }"))
         assertFalse(converted.contains("const "))
         assertFalse(converted.contains("let "))
-        assertTrue(converted.contains("sources: sources"))
-        assertTrue(converted.contains("book_id: book_id"))
+        assertTrue(converted.contains("var sources = __legado_destructure_0.source"))
+        assertTrue(converted.contains("var book_id = __legado_destructure_0.book_id"))
     }
 
     @Test
