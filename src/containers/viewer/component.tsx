@@ -317,7 +317,7 @@ class Viewer extends React.Component<ViewerProps, ViewerState> {
               ? "yes"
               : "no",
           backgroundColor: ConfigService.getReaderConfig("backgroundColor"),
-          isMobile: "no",
+          isMobile: window.innerWidth <= 720 ? "yes" : "no",
           isIndent: ConfigService.getReaderConfig("isIndent"),
           isHyphenation: ConfigService.getReaderConfig("isHyphenation"),
           isStartFromEven: ConfigService.getReaderConfig("isStartFromEven"),

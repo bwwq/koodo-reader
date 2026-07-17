@@ -593,6 +593,17 @@ export const getPageWidth = (
   let pageOffset = "";
   let pageWidth = 0;
   if (readerMode === "scroll" || readerMode === "single") {
+    if (document.body.clientWidth <= 720) {
+      pageWidth = Math.max(
+        12,
+        Math.floor((document.body.clientWidth - 24) / 12) * 12
+      );
+      pageOffset = `calc(50vw - ${pageWidth / 2}px)`;
+      return {
+        pageOffset,
+        pageWidth: pageWidth + "px",
+      };
+    }
     let preWidth =
       document.body.clientWidth * Math.abs(parseFloat(scale)) -
       document.body.clientWidth * 0.4 -

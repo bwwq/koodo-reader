@@ -38,6 +38,7 @@ const PANEL_POSITIONS = ["left", "right", "top", "bottom"] as const;
 type PanelPosition = (typeof PANEL_POSITIONS)[number];
 const PANEL_ENTER_DELAY = 500;
 const PANEL_LEAVE_DELAY = 500;
+const NARROW_READER_WIDTH = 720;
 const enterTimers: Record<string, NodeJS.Timeout | null> = {
   left: null,
   right: null,
@@ -100,6 +101,29 @@ class Reader extends React.Component<ReaderProps, ReaderState> {
           },
         }
   );
+  private responsiveReaderModeHandler = throttle(() => {
+    const book = this.props.currentBook;
+    if (!book?.format) return;
+    const readerMode = this.getReaderMode(book);
+    if (readerMode !== this.props.readerMode) {
+      this.props.handleReaderMode(readerMode);
+      setTimeout(() => this.props.renderBookFunc(), 0);
+    }
+  }, 200);
+  private getReaderMode = (book: Book) => {
+    const configuredMode =
+      (book.format === "PDF" &&
+        !ConfigService.getAllListConfig("convertPDFBooks").includes(
+          book.key
+        )) ||
+      book.format.startsWith("CB")
+        ? ConfigService.getReaderConfig("pdfReaderMode") || "scroll"
+        : ConfigService.getReaderConfig("readerMode") || "double";
+    return window.innerWidth <= NARROW_READER_WIDTH &&
+      configuredMode === "double"
+      ? "single"
+      : configuredMode;
+  };
   constructor(props: ReaderProps) {
     super(props);
     this.state = {
@@ -150,6 +174,7 @@ class Reader extends React.Component<ReaderProps, ReaderState> {
     const throttledMouseMove = throttle(handleMouseMove, 100);
     window.addEventListener("mousemove", throttledMouseMove);
     window.addEventListener("mousemove", this.handleEdgeProximity);
+    window.addEventListener("resize", this.responsiveReaderModeHandler);
     window.addEventListener(MOUSE_POSITION_EVENT, this.handleEdgeProximity);
     window.addEventListener(
       READING_PANEL_TOGGLE_EVENT,
@@ -189,14 +214,7 @@ class Reader extends React.Component<ReaderProps, ReaderState> {
       }
 
       this.props.handleFetchPercentage(book);
-      let readerMode =
-        (book.format === "PDF" &&
-          !ConfigService.getAllListConfig("convertPDFBooks").includes(
-            book.key
-          )) ||
-        book.format.startsWith("CB")
-          ? ConfigService.getReaderConfig("pdfReaderMode") || "scroll"
-          : ConfigService.getReaderConfig("readerMode") || "double";
+      const readerMode = this.getReaderMode(book);
       this.props.handleReaderMode(readerMode);
       this.props.handleReadingBook(book);
       // Start event-driven reading-time tracking
@@ -212,6 +230,7 @@ class Reader extends React.Component<ReaderProps, ReaderState> {
 
   componentWillUnmount() {
     window.removeEventListener("mousemove", this.handleEdgeProximity);
+    window.removeEventListener("resize", this.responsiveReaderModeHandler);
     window.removeEventListener(MOUSE_POSITION_EVENT, this.handleEdgeProximity);
     window.removeEventListener(
       READING_PANEL_TOGGLE_EVENT,
