@@ -30,6 +30,10 @@ import {
   BookImportOptions,
   trackSourceBook,
 } from "../../utils/request/bookSources";
+import {
+  buildBookCache,
+  shouldPreCacheBook,
+} from "../../utils/file/bookCache";
 
 // Convert supportedFormats to react-dropzone v14+ accept format
 // Key is MIME type, value is array of file extensions
@@ -335,16 +339,6 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
                 file_content,
                 rendition
               );
-
-              if (
-                ConfigService.getReaderConfig("isPrecacheBook") === "yes" &&
-                extension !== "pdf"
-              ) {
-                let cache = await rendition.preCache(file_content);
-                if (cache !== "err" || cache) {
-                  await BookUtil.addBook("cache-" + result.key, "zip", cache);
-                }
-              }
             } catch (error) {
               console.error(error, bookName);
               toast.error(this.props.t("Import failed") + ": " + bookName, {
@@ -376,12 +370,19 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
               result.name = previous.name || result.name;
               result.author = previous.author || result.author;
               result.path = "";
-              await BookUtil.deleteBook("cache-" + result.key, "zip");
               await BookUtil.addBook(
                 result.key,
                 result.format.toLowerCase(),
                 file_content as ArrayBuffer
               );
+              options.onPrecacheStatus?.("started");
+              const cached = await buildBookCache(
+                result.key,
+                file_content as ArrayBuffer,
+                rendition,
+                { replace: true }
+              );
+              options.onPrecacheStatus?.(cached ? "completed" : "failed");
               await CoverUtil.addCover(result as BookModel);
               await DatabaseService.saveRecord(result, "books");
               if (options.sourceSubscriptionId) {
@@ -393,6 +394,22 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
                 id: "source-book-update",
               });
               return resolve();
+            }
+
+            if (
+              shouldPreCacheBook(
+                extension,
+                !!options.forcePrecache || !!options.sourceSubscriptionId,
+                ConfigService.getReaderConfig("isPrecacheBook")
+              )
+            ) {
+              options.onPrecacheStatus?.("started");
+              const cached = await buildBookCache(
+                result.key,
+                file_content as ArrayBuffer,
+                rendition
+              );
+              options.onPrecacheStatus?.(cached ? "completed" : "failed");
             }
 
             await this.handleAddBook(

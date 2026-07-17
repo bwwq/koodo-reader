@@ -52,8 +52,10 @@ export interface BookImportJob {
 export interface BookImportOptions {
   sourceSubscriptionId?: string;
   replaceBookKey?: string;
+  forcePrecache?: boolean;
   silent?: boolean;
   onImported?: (bookKey: string) => void;
+  onPrecacheStatus?: (status: "started" | "completed" | "failed") => void;
 }
 
 export type ImportBookFunction = (

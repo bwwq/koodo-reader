@@ -655,7 +655,10 @@ export function removeSearchParams() {
   const url = new URL(window.location.href.split("?")[0]);
   window.history.replaceState({}, document.title, url.toString());
 }
-export const preCacheAllBooks = async (bookList: Book[]) => {
+export const preCacheAllBooks = async (
+  bookList: Book[],
+  onProgress?: (book: Book, current: number, total: number) => void
+) => {
   for (let index = 0; index < bookList.length; index++) {
     const selectedBook = bookList[index];
     if (selectedBook.format === "PDF") {
@@ -671,39 +674,44 @@ export const preCacheAllBooks = async (bookList: Book[]) => {
       continue;
     }
 
-    let result: any = await BookUtil.fetchBook(
-      selectedBook.key,
-      selectedBook.format.toLowerCase(),
-      true,
-      selectedBook.path
-    );
-    let rendition = BookHelper.getRendition(
-      result,
-      {
-        format: selectedBook.format,
-        readerMode: "",
-        charset: selectedBook.charset,
-        animation: ConfigService.getReaderConfig("animation") || "none",
-        convertChinese: ConfigService.getReaderConfig("convertChinese"),
-        bookLayout: ConfigService.getReaderConfig("bookLayout") || "",
-        textRules: getTextRules(selectedBook.key),
-        codeHighlight: ConfigService.getReaderConfig("codeHighlight") || "",
-        fullTranslationMode: "no",
-        textOrientation: ConfigService.getReaderConfig("textOrientation"),
-        parserRegex: "",
-        isDarkMode: "no",
-        isMobile: "no",
-        password: getPdfPassword(selectedBook),
-        isScannedPDF:
-          selectedBook.description.indexOf("scanned") > -1 ? "yes" : "no",
-        isKeepPDFBackground: "no",
-      },
-      Kookit
-    );
-    let cache = await rendition.preCache(result);
-    if (cache !== "err" || cache) {
-      await BookUtil.addBook("cache-" + selectedBook.key, "zip", cache);
+    onProgress?.(selectedBook, index + 1, bookList.length);
+
+    try {
+      let result: any = await BookUtil.fetchBook(
+        selectedBook.key,
+        selectedBook.format.toLowerCase(),
+        true,
+        selectedBook.path
+      );
+      if (!result) continue;
+      let rendition = BookHelper.getRendition(
+        result,
+        {
+          format: selectedBook.format,
+          readerMode: "",
+          charset: selectedBook.charset,
+          animation: ConfigService.getReaderConfig("animation") || "none",
+          convertChinese: ConfigService.getReaderConfig("convertChinese"),
+          bookLayout: ConfigService.getReaderConfig("bookLayout") || "",
+          textRules: getTextRules(selectedBook.key),
+          codeHighlight: ConfigService.getReaderConfig("codeHighlight") || "",
+          fullTranslationMode: "no",
+          textOrientation: ConfigService.getReaderConfig("textOrientation"),
+          parserRegex: "",
+          isDarkMode: "no",
+          isMobile: "no",
+          password: getPdfPassword(selectedBook),
+          isScannedPDF:
+            selectedBook.description.indexOf("scanned") > -1 ? "yes" : "no",
+          isKeepPDFBackground: "no",
+        },
+        Kookit
+      );
+      const { buildBookCache } = await import("./file/bookCache");
+      await buildBookCache(selectedBook.key, result, rendition);
       toast.dismiss("add-book");
+    } catch (error) {
+      console.warn("pre-cache book failed", selectedBook.key, error);
     }
   }
 };

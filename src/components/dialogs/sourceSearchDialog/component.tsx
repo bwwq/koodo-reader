@@ -42,6 +42,7 @@ const stageLabels: Record<string, string> = {
   chapters: "获取章节",
   downloading: "下载文件",
   packaging: "生成 EPUB",
+  preprocessing: "优化打开速度",
   ready: "导入完成",
   failed: "任务失败",
   cancelled: "已取消",
@@ -186,6 +187,18 @@ function SourceSearchDialog(props: Props) {
     let importedBookKey = "";
     await props.importBookFunc(file, {
       sourceSubscriptionId: finalJob.subscription_id,
+      forcePrecache: true,
+      onPrecacheStatus: (status) => {
+        setJob({
+          ...finalJob,
+          status: status === "started" ? "running" : "ready",
+          stage: "preprocessing",
+          current: status === "started" ? 0 : 1,
+          total: 1,
+          error:
+            status === "failed" ? "打开优化失败，下次进入书架时会自动重试" : undefined,
+        });
+      },
       onImported: (bookKey) => {
         importedBookKey = bookKey;
       },

@@ -23,7 +23,7 @@ import { ConfigService } from "../../assets/lib/kookit-extra-browser.min";
 import SortShelfDialog from "../../components/dialogs/sortShelfDialog";
 import PopupNote from "../../components/popups/popupNote";
 import toast from "react-hot-toast";
-import { supportedFormats } from "../../utils/common";
+import { preCacheAllBooks, supportedFormats } from "../../utils/common";
 import {
   isBookDragEvent,
   isExternalFileDragEvent,
@@ -124,8 +124,30 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
         this.props.history.push("/manager/shelf");
       }
     }
-    void this.resumeSourceImports().finally(() => this.refreshSourceBooks());
+    void this.resumeSourceImports()
+      .then(() => this.preCacheTrackedSourceBooks())
+      .finally(() => this.refreshSourceBooks());
   }
+
+  preCacheTrackedSourceBooks = async () => {
+    const trackedKeys = Array.from(
+      new Set(Object.values(getTrackedSourceBooks()))
+    );
+    if (!trackedKeys.length) return;
+    const books = (
+      await Promise.all(
+        trackedKeys.map((key) => DatabaseService.getRecord(key, "books"))
+      )
+    ).filter(Boolean);
+    if (!books.length) return;
+    await preCacheAllBooks(books, (book, current, total) => {
+      toast.loading(
+        `优化打开速度：${book.name.substring(0, 36)} ${current}/${total}`,
+        { id: "source-book-precache" }
+      );
+    });
+    toast.dismiss("source-book-precache");
+  };
 
   resumeSourceImports = async () => {
     const response = await listBookImports();
@@ -153,6 +175,12 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
         let importedBookKey = "";
         await this.props.importBookFunc(file, {
           sourceSubscriptionId: job.subscription_id,
+          forcePrecache: true,
+          onPrecacheStatus: (status) => {
+            if (status === "started") {
+              toast.loading("正在优化打开速度…", { id: toastId });
+            }
+          },
           onImported: (bookKey) => {
             importedBookKey = bookKey;
           },
@@ -234,6 +262,14 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
         await this.props.importBookFunc(file, {
           replaceBookKey: bookKey,
           sourceSubscriptionId: subscription.id,
+          forcePrecache: true,
+          onPrecacheStatus: (status) => {
+            if (status === "started") {
+              toast.loading(`优化《${subscription.title}》的打开速度…`, {
+                id: toastId,
+              });
+            }
+          },
           silent: true,
         });
         const claimed = await claimBookImport(
