@@ -139,7 +139,7 @@ private class SafeWrapFactory : WrapFactory() {
 private val safeWrapFactory = SafeWrapFactory()
 
 internal fun legadoCompatibleJavaScript(script: String): String {
-    var compatible = script.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
+    var compatible = script.replace(Regex("(?m)^([ \\t]*)(?:const|let)(?=\\s)"), "$1var")
     var destructuringIndex = 0
     compatible = Regex("(?ms)^([ \\t]*)var\\s*\\{([^{}]+)}\\s*=\\s*([^;]+);").replace(compatible) { match ->
         val indent = match.groupValues[1]

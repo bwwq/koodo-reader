@@ -93,6 +93,8 @@ class RuleEngineTest {
             """.trimIndent()
         )
         assertFalse(converted.contains("{ source:sources, book_id }"))
+        assertFalse(converted.contains("const "))
+        assertFalse(converted.contains("let "))
         assertTrue(converted.contains("sources: sources"))
         assertTrue(converted.contains("book_id: book_id"))
     }
