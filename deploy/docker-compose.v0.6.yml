@@ -65,7 +65,7 @@ services:
     networks: [koodo]
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=256m,uid=1000,gid=1000
+      - /tmp:rw,noexec,nosuid,size=256m,uid=1001,gid=1001
     shm_size: 1gb
     cpus: 2
     mem_limit: 2g
