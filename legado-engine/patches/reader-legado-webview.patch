@@ -320,3 +320,10 @@ index 77b8231..4fc3419 100644
      }
 
      fun put(key: String, value: String): String {
+@@ -474,5 +477,5 @@ class AnalyzeUrl(
+         @Suppress("RegExpRedundantEscape")
+-        val dataUriFindResult = dataUriRegex.find(urlNoQuery)
++        val dataUriFindResult = dataUriRegex.find(urlNoQuery.replace("\r", "").replace("\n", ""))
+         @Suppress("BlockingMethodInNonBlockingContext")
+         if (dataUriFindResult != null) {
+             val dataUriBase64 = dataUriFindResult.groupValues[1]

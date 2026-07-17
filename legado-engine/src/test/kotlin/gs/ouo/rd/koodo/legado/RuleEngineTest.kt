@@ -3,12 +3,14 @@ package gs.ouo.rd.koodo.legado
 import com.sun.net.httpserver.HttpServer
 import io.legado.app.data.entities.BookSource
 import io.legado.app.data.entities.rule.SearchRule
+import io.legado.app.model.analyzeRule.AnalyzeUrl
 import io.legado.app.model.webBook.WebBook
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.InetSocketAddress
+import java.util.Base64
 
 class RuleEngineTest {
     @Test
@@ -57,6 +59,28 @@ class RuleEngineTest {
         )
 
         assertEquals("https://library.example", source.evalJS("sourceBase()"))
+    }
+
+    @Test
+    fun decodesMultilineDataUrlsReturnedBySourceJavaScript() {
+        val payload = "{\"ok\":true}"
+        val encoded = Base64.getMimeEncoder(8, "\n".toByteArray()).encodeToString(payload.toByteArray())
+        val source = BookSource(
+            bookSourceUrl = "https://books.example",
+            bookSourceName = "Data URL source",
+            searchUrl = "<js>`data:;base64,$encoded,{\"type\":\"json\"}`</js>"
+        )
+        val analyzeUrl = AnalyzeUrl(
+            mUrl = source.searchUrl!!,
+            key = "book",
+            page = 1,
+            baseUrl = source.bookSourceUrl,
+            source = source
+        )
+
+        val response = runBlocking { analyzeUrl.getStrResponseAwait() }
+        assertEquals("json", analyzeUrl.type)
+        assertTrue(response.body()?.isNotBlank() == true)
     }
 
     @Test
