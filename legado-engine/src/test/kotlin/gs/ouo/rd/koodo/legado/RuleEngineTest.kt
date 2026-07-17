@@ -9,6 +9,7 @@ import io.legado.app.model.analyzeRule.RuleData
 import io.legado.app.model.webBook.WebBook
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.InetSocketAddress
