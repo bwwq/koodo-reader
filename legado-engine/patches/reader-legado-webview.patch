@@ -312,6 +312,54 @@ diff --git a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt b/src/m
 index 77b8231..4fc3419 100644
 --- a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
 +++ b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
+@@ -68,14 +68,12 @@ class AnalyzeUrl(
+     init {
+-        if (!mUrl.isDataUrl()) {
+-            val urlMatcher = paramPattern.matcher(baseUrl)
+-            if (urlMatcher.find()) baseUrl = baseUrl.substring(0, urlMatcher.start())
+-            (headerMapF ?: source?.getHeaderMap(true))?.let {
+-                headerMap.putAll(it)
+-                if (it.containsKey("proxy")) {
+-                    proxy = it["proxy"]
+-                    headerMap.remove("proxy")
+-                }
++        val urlMatcher = paramPattern.matcher(baseUrl)
++        if (urlMatcher.find()) baseUrl = baseUrl.substring(0, urlMatcher.start())
++        (headerMapF ?: source?.getHeaderMap(true))?.let {
++            headerMap.putAll(it)
++            if (it.containsKey("proxy")) {
++                proxy = it["proxy"]
++                headerMap.remove("proxy")
+             }
+-            initUrl()
+         }
++        initUrl()
+     }
+@@ -163,9 +161,13 @@ class AnalyzeUrl(
+         val urlMatcher = paramPattern.matcher(ruleUrl)
+         val urlNoOption =
+             if (urlMatcher.find()) ruleUrl.substring(0, urlMatcher.start()) else ruleUrl
+-        url = NetworkUtils.getAbsoluteURL(baseUrl, urlNoOption)
+-        NetworkUtils.getBaseUrl(url)?.let {
+-            baseUrl = it
++        if (urlNoOption.isDataUrl()) {
++            url = urlNoOption
++        } else {
++            url = NetworkUtils.getAbsoluteURL(baseUrl, urlNoOption)
++            NetworkUtils.getBaseUrl(url)?.let {
++                baseUrl = it
++            }
+         }
+         if (urlNoOption.length != ruleUrl.length) {
+             GSON.fromJsonObject<UrlOption>(ruleUrl.substring(urlMatcher.end())).getOrNull()
+@@ -191,6 +193,7 @@ class AnalyzeUrl(
+                     }
+                 }
+         }
++        if (url.isDataUrl() && type == null) type = "data"
+         headerMap[UA_NAME] ?: let {
+             headerMap[UA_NAME] = AppConst.userAgent
+         }
 @@ -250,7 +250,12 @@ class AnalyzeUrl(
          bindings["book"] = ruleData as? Book
          bindings["source"] = source

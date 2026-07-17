@@ -87,6 +87,15 @@ class RuleEngineTest {
         val response = runBlocking { analyzeUrl.getStrResponseAwait() }
         assertEquals("json", analyzeUrl.type)
         assertTrue(response.body()?.isNotBlank() == true)
+
+        val direct = AnalyzeUrl(
+            mUrl = "data:;base64,$encoded,{\"type\":\"json\"}",
+            baseUrl = source.bookSourceUrl,
+            source = source
+        )
+        val directResponse = runBlocking { direct.getStrResponseAwait() }
+        assertEquals("json", direct.type)
+        assertTrue(directResponse.body()?.isNotBlank() == true)
     }
 
     @Test
