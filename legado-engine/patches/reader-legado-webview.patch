@@ -393,7 +393,7 @@ diff --git a/src/main/java/io/legado/app/model/webBook/BookInfo.kt b/src/main/ja
 index 1b1d31f..94af81d 100644
 --- a/src/main/java/io/legado/app/model/webBook/BookInfo.kt
 +++ b/src/main/java/io/legado/app/model/webBook/BookInfo.kt
-@@ -113,7 +113,7 @@ object BookInfo {
+@@ -113,6 +113,6 @@ object BookInfo {
              }
              debugLog?.log(bookSource.bookSourceUrl, "└${book.intro}")
 -        } catch (e: Exception) {
