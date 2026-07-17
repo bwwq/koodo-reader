@@ -592,6 +592,13 @@ func TestBookSourcesRequireLoginAndAreIsolated(t *testing.T) {
 	if forbidden.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("unsafe source accepted: %d %s", forbidden.Code, forbidden.Body.String())
 	}
+	webview := request(t, http.MethodPost, "/v1/book-sources/import", map[string]any{
+		"bookSourceUrl": "https://webview.example", "bookSourceName": "WebView",
+		"searchUrl": `<js>try { Packages.example.Client } catch (e) {}; "https://webview.example/search,{'webView':true}"</js>`,
+	}, bearer(adminToken))
+	if webview.Code != http.StatusOK {
+		t.Fatalf("sandboxed WebView source was rejected: %d %s", webview.Code, webview.Body.String())
+	}
 }
 
 func TestBookSourceNetworkPolicyBlocksSpecialAddresses(t *testing.T) {

@@ -1,0 +1,292 @@
+warning: in the working copy of 'src/main/java/io/legado/app/help/CacheManager.kt', LF will be replaced by CRLF the next time Git touches it
+diff --git a/src/main/java/io/legado/app/adapters/ReaderAdapterInterface.kt b/src/main/java/io/legado/app/adapters/ReaderAdapterInterface.kt
+index e5f2405..b97aed0 100644
+--- a/src/main/java/io/legado/app/adapters/ReaderAdapterInterface.kt
++++ b/src/main/java/io/legado/app/adapters/ReaderAdapterInterface.kt
+@@ -24,4 +24,16 @@ interface ReaderAdapterInterface {
+         userNameSpace: String = "",
+         debugLog: DebugLog? = null
+     ): StrResponse
+-}
+\ No newline at end of file
++
++    suspend fun startBrowserSession(
++        url: String,
++        title: String,
++        source: String,
++        userNameSpace: String,
++        await: Boolean = true,
++        html: String? = null,
++        javaScript: String? = null
++    ): StrResponse = throw UnsupportedOperationException("interactive WebView is not configured")
++
++    fun reportMessage(message: String) {}
++}
+diff --git a/src/main/java/io/legado/app/data/entities/BaseSource.kt b/src/main/java/io/legado/app/data/entities/BaseSource.kt
+index d17ea37..0f7aa3d 100644
+--- a/src/main/java/io/legado/app/data/entities/BaseSource.kt
++++ b/src/main/java/io/legado/app/data/entities/BaseSource.kt
+@@ -167,6 +167,8 @@ interface BaseSource : JsExtensions {
+         bindings["baseUrl"] = getKey()
+         bindings["cookie"] = CookieStore(getUserNameSpace())
+         bindings["cache"] = CacheManager(getUserNameSpace())
+-        return AppConst.SCRIPT_ENGINE.eval(jsStr, bindings)
++        val library = (this as? BookSource)?.jsLib
++        val script = if (library.isNullOrBlank()) jsStr else "$library\n$jsStr"
++        return AppConst.SCRIPT_ENGINE.eval(script, bindings)
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/main/java/io/legado/app/data/entities/BookSource.kt b/src/main/java/io/legado/app/data/entities/BookSource.kt
+index 89d75b2..9295f66 100644
+--- a/src/main/java/io/legado/app/data/entities/BookSource.kt
++++ b/src/main/java/io/legado/app/data/entities/BookSource.kt
+@@ -41,6 +41,7 @@ data class BookSource(
+     var loginCheckJs: String? = null,           // 登录检测js
+     var bookSourceComment: String? = null,           // 注释
+     var variableComment: String? = null,            // 自定义变量说明
++    var jsLib: String? = null,                       // 书源公共 JavaScript
+     var lastUpdateTime: Long = 0,             // 最后更新时间，用于排序
+     var respondTime: Long = 180000L,               // 响应时间，用于排序
+     var weight: Int = 0,                      // 智能排序的权重
+@@ -230,4 +231,4 @@ data class BookSource(
+             GSON.fromJsonObject<ContentRule>(json).getOrNull()
+
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/main/java/io/legado/app/help/CacheManager.kt b/src/main/java/io/legado/app/help/CacheManager.kt
+index a834a12..d6d71c2 100644
+--- a/src/main/java/io/legado/app/help/CacheManager.kt
++++ b/src/main/java/io/legado/app/help/CacheManager.kt
+@@ -5,9 +5,14 @@ import io.legado.app.model.analyzeRule.QueryTTF
+ import io.legado.app.utils.ACache
+ import io.legado.app.adapters.ReaderAdapterHelper
+ import java.io.File
++import java.util.concurrent.ConcurrentHashMap
+
+ class CacheManager(val userNameSpace: String) {
+
++    companion object {
++        private val memory = ConcurrentHashMap<String, Any>()
++    }
++
+     private val queryTTFMap = hashMapOf<String, Pair<Long, QueryTTF>>()
+     val cacheInstance: ACache
+
+@@ -96,4 +101,12 @@ class CacheManager(val userNameSpace: String) {
+         }
+         cacheInstance.remove(key)
+     }
+-}
+\ No newline at end of file
++
++    fun putMemory(key: String, value: Any?): Any? {
++        val scopedKey = "$userNameSpace\u0000$key"
++        if (value == null) memory.remove(scopedKey) else memory[scopedKey] = value
++        return value
++    }
++
++    fun getFromMemory(key: String): Any? = memory["$userNameSpace\u0000$key"]
++}
+diff --git a/src/main/java/io/legado/app/help/JsExtensions.kt b/src/main/java/io/legado/app/help/JsExtensions.kt
+index e176ea4..7141cc2 100644
+--- a/src/main/java/io/legado/app/help/JsExtensions.kt
++++ b/src/main/java/io/legado/app/help/JsExtensions.kt
+@@ -27,6 +27,7 @@ import java.util.*
+ import java.util.zip.ZipEntry
+ import java.util.zip.ZipInputStream
+ import java.text.SimpleDateFormat
++import java.security.MessageDigest
+
+ /**
+  * js扩展类, 在js中通过java变量调用
+@@ -113,13 +114,86 @@ interface JsExtensions {
+      * @return 返回js获取的内容
+      */
+     fun webView(html: String?, url: String?, js: String?): String? {
+-        return null
++        return runBlocking {
++            ReaderAdapterHelper.getAdapter().getStrResponseByRemoteWebview(
++                url = url,
++                html = html,
++                javaScript = js,
++                tag = getSource()?.getKey(),
++                userNameSpace = getUserNameSpace()
++            ).body()
++        }
++    }
++
++    fun startBrowserAwait(url: String, title: String = "网页登录"): StrResponse = runBlocking {
++        ReaderAdapterHelper.getAdapter().startBrowserSession(
++            url, title, getSource()?.getKey() ?: url, getUserNameSpace(), true
++        )
++    }
++
++    fun startBrowser(url: String, title: String = "网页登录"): StrResponse = startBrowserAwait(url, title)
++
++    fun startBrowserDp(url: String, title: String = "网页登录"): StrResponse = startBrowserAwait(url, title)
++
++    fun showBrowser(url: String, title: String = "网页登录"): StrResponse = startBrowserAwait(url, title)
++
++    fun showBrowser(url: String, html: String?, javaScript: String?, options: String? = null): StrResponse = runBlocking {
++        ReaderAdapterHelper.getAdapter().startBrowserSession(
++            url, "网页内容", getSource()?.getKey() ?: url, getUserNameSpace(), true, html, javaScript
++        )
++    }
++
++    fun showReadingBrowser(url: String, title: String = "网页登录"): StrResponse = startBrowserAwait(url, title)
++
++    fun open(url: String, title: String = "网页登录"): StrResponse = startBrowserAwait(url, title)
++
++    fun getWebViewUA(): String = "Mozilla/5.0 (Linux; Android 14; KoodoReader) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
++
++    fun hexDecodeToString(value: String): String = String(StringUtils.hexStringToByte(value), Charsets.UTF_8)
++
++    fun putMemory(key: String, value: Any?): Any? {
++        CacheManager(getUserNameSpace()).put("memory_${md5Encode16(getSource()?.getKey() ?: "source")}_$key", value?.toString() ?: "")
++        return value
++    }
++
++    fun getFromMemory(key: String): String =
++        CacheManager(getUserNameSpace()).get("memory_${md5Encode16(getSource()?.getKey() ?: "source")}_$key") ?: ""
++
++    fun androidId(): String = stableDeviceId("android")
++
++    fun deviceID(): String = stableDeviceId("device")
++
++    fun getAppVariant(): String = "release"
++
++    fun getLanguage(): String = "zh-CN"
++
++    fun refreshExplore() { log("请求刷新发现页") }
++
++    fun searchBook(keyword: String = "") { log("请求搜索: $keyword") }
++
++    fun reLoginView() { log("请求重新登录") }
++
++    fun qread(): Nothing = throw UnsupportedOperationException("轻阅读专用接口不可用")
++
++    fun openVideoPlayer(url: String, title: String = ""): Nothing =
++        throw UnsupportedOperationException("当前版本不支持视频播放")
++
++    fun playTTS(text: String = ""): Nothing =
++        throw UnsupportedOperationException("当前版本不支持原生 TTS")
++
++    private fun stableDeviceId(kind: String): String {
++        val value = "$kind\u0000${getUserNameSpace()}\u0000${getSource()?.getKey() ?: "source"}"
++        return MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
++            .take(16).joinToString("") { "%02x".format(it) }
+     }
+
+     /**
+      * 可从网络，本地文件(阅读私有缓存目录和书籍保存位置支持相对路径)导入JavaScript脚本
+      */
+     fun importScript(path: String): String {
++        if (!path.startsWith("http://") && !path.startsWith("https://")) {
++            throw SecurityException("local script imports are disabled")
++        }
+         val result = when {
+             path.startsWith("http") -> cacheFile(path) ?: ""
+             path.startsWith("/storage") -> FileUtils.readText(path)
+@@ -176,19 +250,7 @@ interface JsExtensions {
+      * @return 相对路径
+      */
+     fun downloadFile(content: String, url: String): String {
+-        val type = AnalyzeUrl(url).type ?: return ""
+-        val zipPath = FileUtils.getPath(
+-            FileUtils.createFolderIfNotExist(FileUtils.getCachePath()),
+-            "${MD5Utils.md5Encode16(url)}.${type}"
+-        )
+-        FileUtils.deleteFile(zipPath)
+-        val zipFile = FileUtils.createFileIfNotExist(zipPath)
+-        StringUtils.hexStringToByte(content).let {
+-            if (it.isNotEmpty()) {
+-                zipFile.writeBytes(it)
+-            }
+-        }
+-        return zipPath.substring(FileUtils.getCachePath().length)
++        throw SecurityException("book-source file writes are disabled")
+     }
+
+     /**
+@@ -348,13 +410,7 @@ interface JsExtensions {
+      * @return File
+      */
+     fun getFile(path: String): File {
+-        val cachePath = ReaderAdapterHelper.getAdapter().getCacheDir()
+-        val aPath: String = if (path.startsWith(File.separator)) {
+-            cachePath + path
+-        } else {
+-            cachePath + File.separator + path
+-        }
+-        return File(aPath)
++        throw SecurityException("book-source file access is disabled")
+     }
+
+     fun readFile(path: String): ByteArray? {
+@@ -509,7 +565,7 @@ interface JsExtensions {
+                 }
+                 return@runBlocking x
+             }
+-            str.indexOf("storage/") > 0 -> File(str).readBytes()
++            str.indexOf("storage/") > 0 -> throw SecurityException("book-source file access is disabled")
+             else -> base64DecodeToByteArray(str)
+         }
+         font ?: return null
+@@ -544,6 +600,7 @@ interface JsExtensions {
+      * 弹窗提示
+      */
+     fun toast(msg: Any?) {
++        ReaderAdapterHelper.getAdapter().reportMessage(msg.toString())
+         Debug.log("toast: " + msg.toString())
+     }
+
+@@ -551,6 +608,7 @@ interface JsExtensions {
+      * 弹窗提示 停留时间较长
+      */
+     fun longToast(msg: Any?) {
++        ReaderAdapterHelper.getAdapter().reportMessage(msg.toString())
+         Debug.log("longToast: " + msg.toString())
+     }
+
+@@ -558,6 +616,7 @@ interface JsExtensions {
+      * 输出调试日志
+      */
+     fun log(msg: String): String {
++        ReaderAdapterHelper.getAdapter().reportMessage(msg)
+         Debug.log(msg)
+         return msg
+     }
+diff --git a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt
+index 2cc200e..f41c96a 100644
+--- a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt
++++ b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt
+@@ -659,7 +659,9 @@ class AnalyzeRule(
+         bindings["title"] = chapter?.title
+         bindings["src"] = content
+         bindings["nextChapterUrl"] = nextChapterUrl
+-        return SCRIPT_ENGINE.eval(jsStr, bindings)
++        val library = (source as? io.legado.app.data.entities.BookSource)?.jsLib
++        val script = if (library.isNullOrBlank()) jsStr else "$library\n$jsStr"
++        return SCRIPT_ENGINE.eval(script, bindings)
+     }
+
+     override fun getSource(): BaseSource? {
+diff --git a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
+index 77b8231..4fc3419 100644
+--- a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
++++ b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
+@@ -250,7 +250,9 @@ class AnalyzeUrl(
+         bindings["book"] = ruleData as? Book
+         bindings["source"] = source
+         bindings["result"] = result
+-        return SCRIPT_ENGINE.eval(jsStr, bindings)
++        val library = (source as? io.legado.app.data.entities.BookSource)?.jsLib
++        val script = if (library.isNullOrBlank()) jsStr else "$library\n$jsStr"
++        return SCRIPT_ENGINE.eval(script, bindings)
+     }
+
+     fun put(key: String, value: String): String {

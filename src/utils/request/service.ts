@@ -20,6 +20,8 @@ export type ServiceCapability =
   | "source.search"
   | "source.legado"
   | "source.sonovel"
+  | "source.webview"
+  | "source.comic"
   | "storage.oauth";
 
 export interface ApiResponse<T> {

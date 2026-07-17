@@ -84,6 +84,7 @@ func searchSoNovel(ctx context.Context, userID string, source bookSource, keywor
 			Summary:     value.Intro,
 			Latest:      value.LatestChapter,
 			Format:      "epub",
+			MediaType:   "text",
 			Raw:         raw,
 			DownloadURL: value.URL,
 			ExpiresAt:   time.Now().Add(searchResultTTL),

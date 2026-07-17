@@ -53,8 +53,8 @@ def login(username, password):
 
 def main():
     health = api("GET", "/v1/health")
-    assert health["version"] == "0.5.0"
-    assert {"sync.data", "sync.koreader", "storage.files", "source.search", "source.legado", "source.sonovel"}.issubset(
+    assert health["version"] == "0.6.0"
+    assert {"sync.data", "sync.koreader", "storage.files", "source.search", "source.legado", "source.webview", "source.comic", "source.sonovel"}.issubset(
         health["capabilities"]
     )
 

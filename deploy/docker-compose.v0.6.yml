@@ -1,0 +1,111 @@
+services:
+  service:
+    image: koodo-reader-service:0.6.0
+    container_name: koodo-reader-service
+    restart: unless-stopped
+    environment:
+      SERVICE_PORT: "8081"
+      SERVICE_DB: /data/service.db
+      SERVICE_FILES_DIR: /data/files
+      LEGADO_ENGINE_URL: http://legado-engine:9080
+      LEGADO_WEBVIEW_URL: http://legado-webview:9223
+      SONOVEL_ENGINE_URL: http://sonovel-engine:7765
+      LEGADO_ENGINE_TOKEN: ${LEGADO_ENGINE_TOKEN:?set LEGADO_ENGINE_TOKEN}
+      LEGADO_WEBVIEW_TOKEN: ${LEGADO_WEBVIEW_TOKEN:?set LEGADO_WEBVIEW_TOKEN}
+      BOOK_SOURCE_PRIVATE_HOSTS: ${BOOK_SOURCE_PRIVATE_HOSTS:-}
+    volumes:
+      - /opt/koodo-reader-service/data:/data
+    networks: [koodo]
+    depends_on:
+      legado-engine:
+        condition: service_healthy
+      legado-webview:
+        condition: service_healthy
+      sonovel-engine:
+        condition: service_healthy
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
+  legado-engine:
+    image: koodo-legado-engine:0.6.0
+    container_name: koodo-legado-engine
+    restart: unless-stopped
+    environment:
+      LEGADO_PORT: "9080"
+      LEGADO_DATA: /data
+      LEGADO_ENGINE_TOKEN: ${LEGADO_ENGINE_TOKEN:?set LEGADO_ENGINE_TOKEN}
+      LEGADO_WEBVIEW_URL: http://legado-webview:9223
+      LEGADO_WEBVIEW_TOKEN: ${LEGADO_WEBVIEW_TOKEN:?set LEGADO_WEBVIEW_TOKEN}
+      LEGADO_ALLOWED_PRIVATE_HOSTS: ${BOOK_SOURCE_PRIVATE_HOSTS:-}
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx512m -XX:+ExitOnOutOfMemoryError
+    volumes:
+      - /opt/koodo-reader-service/legado:/data
+    networks: [koodo]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    cpus: 2
+    mem_limit: 768m
+    pids_limit: 256
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
+  legado-webview:
+    image: koodo-legado-webview:0.6.0
+    container_name: koodo-legado-webview
+    restart: unless-stopped
+    environment:
+      WEBVIEW_PORT: "9223"
+      WEBVIEW_DATA: /data
+      LEGADO_WEBVIEW_TOKEN: ${LEGADO_WEBVIEW_TOKEN:?set LEGADO_WEBVIEW_TOKEN}
+      WEBVIEW_STATE_KEY: ${WEBVIEW_STATE_KEY:?set WEBVIEW_STATE_KEY}
+      BOOK_SOURCE_PRIVATE_HOSTS: ${BOOK_SOURCE_PRIVATE_HOSTS:-}
+    volumes:
+      - /opt/koodo-reader-service/webview:/data
+    networks: [koodo]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m,uid=1000,gid=1000
+    shm_size: 1gb
+    cpus: 2
+    mem_limit: 2g
+    pids_limit: 512
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9223/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  sonovel-engine:
+    image: ghcr.io/freeok/sonovel:1.11.0
+    container_name: koodo-sonovel-engine
+    restart: unless-stopped
+    user: "10001:10001"
+    environment:
+      JAVA_OPTS: -Dmode=web -Xms64m -Xmx512m -XX:+ExitOnOutOfMemoryError
+    volumes:
+      - /opt/koodo-reader-service/sonovel/downloads:/sonovel/downloads
+      - /opt/koodo-reader-service/sonovel/logs:/sonovel/logs
+    networks: [koodo]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,uid=10001,gid=10001
+    cpus: 2
+    mem_limit: 768m
+    pids_limit: 256
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/7765'"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+networks:
+  koodo:
+    name: koodo-reader-net
+    external: true

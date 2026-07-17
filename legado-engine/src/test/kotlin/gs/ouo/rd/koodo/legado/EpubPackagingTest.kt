@@ -10,6 +10,28 @@ import java.util.zip.ZipFile
 
 class EpubPackagingTest {
     @Test
+    fun embedsComicImagesAndRemovesRemoteScripts() {
+        val directory = Files.createTempDirectory("koodo-comic-test").toFile()
+        val output = directory.resolve("comic.epub")
+        val image = ImageAsset("images/page-0.png", byteArrayOf(1, 2, 3, 4), "image/png")
+        val book = Book(bookUrl = "https://books.example/comic", originName = "Comic source", name = "Comic", author = "Artist")
+        try {
+            writeEpub(book, listOf("Episode 1" to "<script>alert(1)</script><p><img src=\"images/page-0.png\"/></p>"), output, null, listOf(image))
+            ZipFile(output).use { zip ->
+                assertTrue(zip.getEntry("OEBPS/images/page-0.png") != null)
+                assertTrue(zip.text("OEBPS/content.opf").contains("media-type=\"image/png\""))
+                val page = zip.text("OEBPS/part-0.xhtml")
+                assertTrue(page.contains("images/page-0.png"))
+                assertFalse(page.contains("alert(1)"))
+                assertFalse(page.contains("https://books.example"))
+            }
+        } finally {
+            output.delete()
+            directory.delete()
+        }
+    }
+
+    @Test
     fun groupsLargeChapterSetsButKeepsEveryNavigationTarget() {
         val directory = Files.createTempDirectory("koodo-epub-test").toFile()
         val output = directory.resolve("grouped.epub")

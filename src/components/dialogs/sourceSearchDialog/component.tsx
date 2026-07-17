@@ -3,22 +3,34 @@ import toast from "react-hot-toast";
 import { ConfigService } from "../../../assets/lib/kookit-extra-browser.min";
 import {
   BookImportJob,
+  BookBrowserSession,
+  BookSourceAction,
+  BookSourceProfile,
   BookSourceItem,
   ImportBookFunction,
   SourceSearchEvent,
   SourceSearchResult,
   cancelBookImport,
+  cancelBookBrowserSession,
   claimBookImport,
   createBookImport,
   deleteBookSource,
   downloadBookImport,
   getBookImportFormat,
+  getBookBrowserWebSocketURL,
+  getBookSourceProfile,
   importBookSourceContent,
   importBookSourceURL,
   importOPDSSource,
   listBookSources,
+  listBookBrowserSessions,
   markBookImportCompleted,
   searchBookSources,
+  runBookSourceAction,
+  watchBookSourceAction,
+  clearBookSourceSession,
+  createBookBrowserTicket,
+  finishBookBrowserSession,
   updateBookSource,
   watchBookImport,
 } from "../../../utils/request/bookSources";
@@ -40,6 +52,8 @@ const stageLabels: Record<string, string> = {
   preparing: "准备下载",
   book_info: "解析详情",
   chapters: "获取章节",
+  images: "下载并处理图片",
+  waiting_user: "等待完成网页操作",
   downloading: "下载文件",
   packaging: "生成 EPUB",
   preprocessing: "优化打开速度",
@@ -67,7 +81,15 @@ function SourceSearchDialog(props: Props) {
   const [job, setJob] = useState<BookImportJob | null>(null);
   const [loadingSources, setLoadingSources] = useState(true);
   const [sourceError, setSourceError] = useState("");
+  const [profileSource, setProfileSource] = useState<BookSourceItem | null>(null);
+  const [profile, setProfile] = useState<BookSourceProfile | null>(null);
+  const [sourceAction, setSourceAction] = useState<BookSourceAction | null>(null);
+  const [browserSession, setBrowserSession] = useState<BookBrowserSession | null>(null);
+  const [browserFrame, setBrowserFrame] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const profileFormRef = useRef<HTMLFormElement>(null);
+  const browserTextRef = useRef<HTMLInputElement>(null);
+  const browserSocketRef = useRef<WebSocket | null>(null);
 
   const refreshSources = async () => {
     setLoadingSources(true);
@@ -124,6 +146,42 @@ function SourceSearchDialog(props: Props) {
     localStorage.setItem(LAST_SELECTION_KEY, JSON.stringify(selected));
   }, [selected]);
 
+  useEffect(() => () => {
+    browserSocketRef.current?.close();
+  }, []);
+
+  const connectBrowser = async (session: BookBrowserSession) => {
+    if (browserSession?.id === session.id && browserSocketRef.current) return;
+    const ticket = await createBookBrowserTicket(session.id);
+    if (ticket.code !== 200 || !ticket.data) return toast.error(ticket.msg || "无法打开网页操作");
+    browserSocketRef.current?.close();
+    setBrowserSession(session);
+    const socket = new WebSocket(getBookBrowserWebSocketURL(session.id, ticket.data.ticket));
+    socket.binaryType = "blob";
+    socket.onmessage = (event) => {
+      if (!(event.data instanceof Blob)) return;
+      setBrowserFrame((previous) => {
+        if (previous) URL.revokeObjectURL(previous);
+        return URL.createObjectURL(event.data);
+      });
+    };
+    socket.onerror = () => toast.error("网页画面连接中断");
+    browserSocketRef.current = socket;
+  };
+
+  useEffect(() => {
+    const active = searching || !!sourceAction && ["queued", "running"].includes(sourceAction.status) || !!job && ["queued", "running", "waiting_user"].includes(job.status);
+    if (!active) return;
+    const poll = async () => {
+      const response = await listBookBrowserSessions();
+      const session = response.data?.find((item) => item.state === "active");
+      if (session && session.id !== browserSession?.id) await connectBrowser(session);
+    };
+    poll();
+    const timer = window.setInterval(poll, 1000);
+    return () => window.clearInterval(timer);
+  }, [searching, sourceAction?.status, job?.status, browserSession?.id]);
+
   const groups = useMemo(() => groupSourceResults(results), [results]);
 
   const toggleSource = (id: string) => {
@@ -166,6 +224,9 @@ function SourceSearchDialog(props: Props) {
   };
 
   const startImport = async (result: SourceSearchResult) => {
+    if (result.media_type === "unsupported") {
+      return toast.error("当前版本暂不支持听书、短剧或视频离线导入");
+    }
     const response = await createBookImport(result.id);
     if ((response.code !== 202 && response.code !== 200) || !response.data) {
       toast.error(response.msg || "无法创建导入任务");
@@ -258,6 +319,65 @@ function SourceSearchDialog(props: Props) {
     await refreshSources();
   };
 
+  const openSourceProfile = async (source: BookSourceItem) => {
+    const response = await getBookSourceProfile(source.id);
+    if (response.code !== 200 || !response.data) return toast.error(response.msg || "读取书源设置失败");
+    setProfileSource(source);
+    setProfile(response.data);
+    setSourceAction(null);
+  };
+
+  const runSourceAction = async (actionId: string) => {
+    if (!profileSource || !profile || !profileFormRef.current) return;
+    const values: Record<string, string | boolean> = {};
+    const data = new FormData(profileFormRef.current);
+    profile.fields.forEach((field) => {
+      if (field.type === "button") return;
+      values[field.name] = field.type === "checkbox" ? data.has(field.name) : String(data.get(field.name) || "");
+    });
+    const response = await runBookSourceAction(profileSource.id, actionId, values);
+    profileFormRef.current.querySelectorAll<HTMLInputElement>('input[type="password"]').forEach((input) => { input.value = ""; });
+    if (response.code !== 202 || !response.data) return toast.error(response.msg || "操作启动失败");
+    setSourceAction(response.data);
+    let finalAction = response.data;
+    const watched = await watchBookSourceAction(response.data.id, (next) => {
+      finalAction = next;
+      setSourceAction(next);
+    });
+    if (watched.code !== 200) return toast.error(watched.msg || "操作连接中断");
+    if (finalAction.status === "ready") {
+      toast.success(finalAction.message || "操作已完成");
+      await refreshSources();
+      const refreshed = await getBookSourceProfile(profileSource.id);
+      if (refreshed.code === 200 && refreshed.data) setProfile(refreshed.data);
+    } else toast.error(finalAction.error || "操作失败");
+  };
+
+  const clearSourceLogin = async () => {
+    if (!profileSource) return;
+    const response = await clearBookSourceSession(profileSource.id);
+    if (response.code !== 200) return toast.error(response.msg || "清除失败");
+    toast.success("登录状态已清除");
+    setProfileSource(null);
+    setProfile(null);
+    await refreshSources();
+  };
+
+  const sendBrowserEvent = (event: object) => {
+    const socket = browserSocketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event));
+  };
+
+  const closeBrowser = async (finish: boolean) => {
+    if (!browserSession) return;
+    if (finish) await finishBookBrowserSession(browserSession.id);
+    else await cancelBookBrowserSession(browserSession.id);
+    browserSocketRef.current?.close();
+    browserSocketRef.current = null;
+    setBrowserSession(null);
+    setBrowserFrame((previous) => { if (previous) URL.revokeObjectURL(previous); return ""; });
+  };
+
   const openOnlineServiceSettings = () => {
     props.handleSourceSearchDialog(false);
     props.handleSettingMode("account");
@@ -265,7 +385,7 @@ function SourceSearchDialog(props: Props) {
   };
 
   const close = () => {
-    if (searching || (job && ["queued", "running"].includes(job.status))) {
+    if (searching || (job && ["queued", "running", "waiting_user"].includes(job.status))) {
       if (!window.confirm("搜索或导入仍在进行，确定关闭？")) return;
     }
     props.handleSourceSearchDialog(false);
@@ -322,8 +442,14 @@ function SourceSearchDialog(props: Props) {
                     <span><b>{source.name}</b><small>{sourceTypeLabels[source.type] || source.type}{source.group ? ` · ${source.group}` : ""}</small></span>
                   </label>
                   <em className={sourceStatus[source.id]?.includes("失败") ? "error" : ""}>{sourceStatus[source.id] || ""}</em>
+                  {source.compatibility && (
+                    <small className={`source-compatibility ${source.compatibility.status}`} title={(source.compatibility.reasons || []).join("\n")}>
+                      {source.compatibility.status === "compatible" ? "兼容" : source.compatibility.status === "partial" ? "部分兼容" : "不兼容"}
+                    </small>
+                  )}
                   {!source.built_in && (
                     <span className="source-actions">
+                      {(source.features?.includes("login") || source.features?.includes("webview")) && <button onClick={() => openSourceProfile(source)}>登录/设置</button>}
                       <button onClick={() => setEnabled(source)}>{source.enabled ? "停用" : "启用"}</button>
                       <button onClick={() => removeSource(source)}>删除</button>
                     </span>
@@ -359,9 +485,9 @@ function SourceSearchDialog(props: Props) {
                 <p className="source-summary">{group.variants[0].summary || "暂无简介"}</p>
                 <div className="source-variants">
                   {group.variants.map((variant) => (
-                    <button key={variant.id} onClick={() => startImport(variant)} disabled={!!job}>
+                    <button key={variant.id} onClick={() => startImport(variant)} disabled={!!job || variant.media_type === "unsupported"}>
                       <span>{variant.source_name}</span>
-                      <small>{variant.latest_chapter || variant.format?.toUpperCase() || (variant.source_type === "opds" ? "下载" : "生成 EPUB")}</small>
+                      <small>{variant.media_type === "comic" ? "漫画 EPUB" : variant.media_type === "unsupported" ? "暂不支持此媒体" : variant.latest_chapter || variant.format?.toUpperCase() || (variant.source_type === "opds" ? "下载" : "生成 EPUB")}</small>
                     </button>
                   ))}
                 </div>
@@ -378,9 +504,48 @@ function SourceSearchDialog(props: Props) {
         <div className="source-job">
           <div><strong>{stageLabels[job.stage] || job.stage}</strong><span>{job.total ? `${job.current} / ${job.total}` : ""}</span></div>
           <progress max={job.total || 1} value={job.current || (job.status === "ready" ? 1 : 0)} />
+          {job.message && <p>{job.message}</p>}
           {job.error && <p>{job.error}</p>}
-          {["queued", "running"].includes(job.status) && <button onClick={async () => { await cancelBookImport(job.id); setJob(null); }}>取消任务</button>}
+          {["queued", "running", "waiting_user"].includes(job.status) && <button onClick={async () => { await cancelBookImport(job.id); setJob(null); }}>取消任务</button>}
           {["failed", "cancelled"].includes(job.status) && <button onClick={() => setJob(null)}>关闭</button>}
+        </div>
+      )}
+
+      {profileSource && profile && (
+        <div className="source-profile-backdrop">
+          <section className="source-profile-panel">
+            <header><h3>{profileSource.name}</h3><button aria-label="关闭" onClick={() => { setProfileSource(null); setProfile(null); }}>×</button></header>
+            <form ref={profileFormRef} autoComplete="off">
+              {profile.fields.map((field, index) => {
+                const key = `${field.name}-${index}`;
+                if (field.type === "button") return <button className="source-profile-action" type="button" key={key} disabled={!field.action_id || !!sourceAction && ["queued", "running"].includes(sourceAction.status)} onClick={() => field.action_id && runSourceAction(field.action_id)}>{field.name}</button>;
+                if (field.type === "select") return <label key={key}><span>{field.name}</span><select name={field.name} defaultValue={String(field.value || "")}>{(field.options || []).map((option) => { const value = typeof option === "string" ? option : option.value; const label = typeof option === "string" ? option : option.label; return <option value={value} key={value}>{label}</option>; })}</select></label>;
+                if (field.type === "checkbox") return <label className="source-profile-check" key={key}><input name={field.name} type="checkbox" defaultChecked={!!field.value} /><span>{field.name}</span></label>;
+                return <label key={key}><span>{field.name}</span><input name={field.name} type={field.type === "password" ? "password" : "text"} defaultValue={field.type === "password" ? "" : String(field.value || "")} autoComplete="off" /></label>;
+              })}
+            </form>
+            {sourceAction && <p className={sourceAction.status === "failed" ? "error" : ""}>{sourceAction.status === "running" ? "正在处理…" : sourceAction.error || sourceAction.message || "等待处理"}</p>}
+            <footer><button onClick={clearSourceLogin}>退出并清除状态</button><span>{profile.login_state === "configured" ? "已保存登录状态" : "尚未保存登录状态"}</span></footer>
+          </section>
+        </div>
+      )}
+
+      {browserSession && (
+        <div className="source-browser-backdrop">
+          <section className="source-browser-panel">
+            <header><div><h3>{browserSession.title}</h3><small>{browserSession.url}</small></div><button onClick={() => closeBrowser(false)} aria-label="取消">×</button></header>
+            <div className="source-browser-screen">
+              {browserFrame ? <img src={browserFrame} alt="网页操作画面" draggable={false} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); sendBrowserEvent({ type: "click", x: (event.clientX - rect.left) * event.currentTarget.naturalWidth / rect.width, y: (event.clientY - rect.top) * event.currentTarget.naturalHeight / rect.height }); }} /> : <span>正在加载网页画面…</span>}
+            </div>
+            <div className="source-browser-controls">
+              <input ref={browserTextRef} placeholder="输入到网页当前焦点" onKeyDown={(event) => { if (event.key === "Enter") { sendBrowserEvent({ type: "text", text: event.currentTarget.value }); event.currentTarget.value = ""; } }} />
+              <button onClick={() => { const input = browserTextRef.current; if (input?.value) { sendBrowserEvent({ type: "text", text: input.value }); input.value = ""; } }}>输入</button>
+              <button title="向上滚动" onClick={() => sendBrowserEvent({ type: "scroll", deltaY: -560 })}>↑</button>
+              <button title="向下滚动" onClick={() => sendBrowserEvent({ type: "scroll", deltaY: 560 })}>↓</button>
+              <button onClick={() => sendBrowserEvent({ type: "reload" })}>刷新</button>
+              <button className="source-primary" onClick={() => closeBrowser(true)}>完成</button>
+            </div>
+          </section>
         </div>
       )}
     </div>

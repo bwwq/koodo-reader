@@ -33,6 +33,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "7.6.4"
+      - name: Apply server compatibility patch to pinned reader-legado
+        run: git -C vendor/reader-legado apply ../../legado-engine/patches/reader-legado-webview.patch
       - name: Build and test pinned Legado engine
         working-directory: legado-engine
         env:
@@ -40,6 +42,21 @@ jobs:
         run: gradle --no-daemon test shadowJar
       - name: Build hardened engine image
         run: docker build -f legado-engine/Dockerfile -t koodo-legado-engine:test .
+
+  legado-webview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install and test WebView service
+        working-directory: legado-webview
+        run: npm install --ignore-scripts && npm test
+      - name: Build isolated WebView image
+        run: docker build -f legado-webview/Dockerfile -t koodo-legado-webview:test legado-webview
+      - name: Run truly headless Chromium integration test
+        run: docker run --rm --entrypoint npm koodo-legado-webview:test run test:integration
 
   web:
     runs-on: ubuntu-latest

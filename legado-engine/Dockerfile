@@ -2,6 +2,14 @@ FROM --platform=$BUILDPLATFORM gradle:7.6.4-jdk8 AS builder
 WORKDIR /src
 COPY vendor/reader-legado /src/vendor/reader-legado
 COPY legado-engine /src/legado-engine
+RUN cd /src/vendor/reader-legado && \
+    if git apply --check /src/legado-engine/patches/reader-legado-webview.patch; then \
+      git apply /src/legado-engine/patches/reader-legado-webview.patch; \
+    elif git apply --reverse --check /src/legado-engine/patches/reader-legado-webview.patch; then \
+      true; \
+    else \
+      echo "reader-legado compatibility patch does not apply" >&2; exit 1; \
+    fi
 WORKDIR /src/legado-engine
 RUN gradle --no-daemon shadowJar
 

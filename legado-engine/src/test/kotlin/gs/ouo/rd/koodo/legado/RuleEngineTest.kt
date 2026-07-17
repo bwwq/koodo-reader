@@ -12,6 +12,14 @@ import java.net.InetSocketAddress
 
 class RuleEngineTest {
     @Test
+    fun acceptsWebViewSourcesWithGuardedEnvironmentProbes() {
+        val source = validateSource(
+            """{"bookSourceUrl":"https://books.example","bookSourceName":"WebView source","searchUrl":"<js>try { Packages.example.Client } catch(e) {}; 'https://books.example,{\"webView\":true}'</js>"}"""
+        )
+        assertEquals("WebView source", source.bookSourceName)
+    }
+
+    @Test
     fun parsesModernSearchOnlySourceJson() {
         val source = validateSource(
             """

@@ -37,6 +37,10 @@
 .source-row small { font-size: 10px; opacity: .5; margin-top: 2px; }
 .source-row em { margin-left: 25px; font-size: 10px; opacity: .65; font-style: normal; }
 .source-row em.error { color: #e05252; opacity: 1; }
+.source-compatibility { display: inline-block; margin: 3px 0 0 25px; font-size: 10px; }
+.source-compatibility.compatible { color: #26845b; }
+.source-compatibility.partial { color: #a86d12; }
+.source-compatibility.incompatible { color: #d14b4b; }
 .source-actions { float: right; margin-top: -24px; }
 .source-actions button { font-size: 10px; padding: 3px 5px; margin-left: 3px; }
 .source-import { padding: 10px; border-top: 1px solid rgba(128,128,128,.16); }
@@ -68,6 +72,29 @@
 .source-job progress { width: 100%; margin: 9px 0 5px; accent-color: #f16464; }
 .source-job p { color: #ff9a9a; font-size: 11px; word-break: break-word; }
 .source-job button { float: right; padding: 6px 10px; }
+.source-profile-backdrop, .source-browser-backdrop { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,.48); }
+.source-profile-panel, .source-browser-panel { width: min(620px, 100%); max-height: min(760px, 92vh); overflow: hidden; display: flex; flex-direction: column; border-radius: 8px; background: var(--background-color, #fff); color: inherit; box-shadow: 0 20px 70px rgba(0,0,0,.38); }
+.source-profile-panel > header, .source-browser-panel > header { padding: 12px 14px; border-bottom: 1px solid rgba(128,128,128,.2); }
+.source-profile-panel > header h3, .source-browser-panel > header h3 { margin: 0; font-size: 16px; }
+.source-profile-panel > header button, .source-browser-panel > header button { margin-left: auto; width: 32px; height: 32px; font-size: 20px; }
+.source-profile-panel form { padding: 14px; overflow: auto; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.source-profile-panel form label { min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.source-profile-panel form input, .source-profile-panel form select, .source-browser-controls input { min-width: 0; border: 1px solid rgba(128,128,128,.3); border-radius: 6px; padding: 9px; color: inherit; background: transparent; }
+.source-profile-panel form .source-profile-check { flex-direction: row; align-items: center; }
+.source-profile-action { min-height: 38px; padding: 8px 10px; }
+.source-profile-panel > p { margin: 0 14px 10px; font-size: 12px; }
+.source-profile-panel > p.error { color: #d14b4b; }
+.source-profile-panel > footer { padding: 10px 14px; display: flex; align-items: center; gap: 10px; border-top: 1px solid rgba(128,128,128,.18); }
+.source-profile-panel > footer span { margin-left: auto; font-size: 11px; opacity: .6; }
+.source-profile-panel > footer button { padding: 7px 10px; color: #c43b3b; }
+.source-browser-panel { width: min(980px, 100%); height: min(820px, 94vh); }
+.source-browser-panel > header div { min-width: 0; }
+.source-browser-panel > header small { display: block; max-width: 760px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .55; }
+.source-browser-screen { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; background: #181818; }
+.source-browser-screen > span { color: #fff; opacity: .65; }
+.source-browser-screen img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; cursor: crosshair; }
+.source-browser-controls { display: grid; grid-template-columns: minmax(120px,1fr) auto auto auto auto auto; gap: 6px; padding: 9px; border-top: 1px solid rgba(128,128,128,.2); }
+.source-browser-controls button { min-width: 42px; padding: 8px 10px; }
 @media (max-width: 700px) {
   .source-search-dialog { inset: 0; border-radius: 0; }
   .source-search-dialog header { padding: 12px; }
@@ -77,4 +104,9 @@
   .source-results { padding: 9px; }
   .source-result-card { padding: 10px; }
   .source-job { inset: auto 10px 10px; width: auto; }
+  .source-profile-backdrop, .source-browser-backdrop { padding: 0; }
+  .source-profile-panel, .source-browser-panel { width: 100%; height: 100%; max-height: none; border-radius: 0; }
+  .source-profile-panel form { grid-template-columns: 1fr; }
+  .source-browser-controls { grid-template-columns: minmax(100px,1fr) auto auto auto; }
+  .source-browser-controls button:nth-last-child(2), .source-browser-controls button:last-child { grid-column: span 2; }
 }

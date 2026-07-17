@@ -32,16 +32,19 @@ const (
 )
 
 type bookSource struct {
-	ID         string          `json:"id"`
-	Type       string          `json:"type"`
-	Name       string          `json:"name"`
-	Group      string          `json:"group,omitempty"`
-	URL        string          `json:"url"`
-	Enabled    bool            `json:"enabled"`
-	BuiltIn    bool            `json:"built_in,omitempty"`
-	Searchable bool            `json:"searchable"`
-	Definition json.RawMessage `json:"-"`
-	UpdatedAt  int64           `json:"updated_at,omitempty"`
+	ID            string         `json:"id"`
+	Type          string         `json:"type"`
+	Name          string         `json:"name"`
+	Group         string         `json:"group,omitempty"`
+	URL           string         `json:"url"`
+	Enabled       bool           `json:"enabled"`
+	BuiltIn       bool           `json:"built_in,omitempty"`
+	Searchable    bool           `json:"searchable"`
+	Definition    json.RawMessage `json:"-"`
+	UpdatedAt     int64          `json:"updated_at,omitempty"`
+	Features      []string       `json:"features,omitempty"`
+	Compatibility map[string]any `json:"compatibility,omitempty"`
+	LoginState    string         `json:"login_state,omitempty"`
 }
 
 type cachedSearchResult struct {
@@ -56,6 +59,7 @@ type cachedSearchResult struct {
 	CoverURL    string          `json:"cover_url,omitempty"`
 	Latest      string          `json:"latest_chapter,omitempty"`
 	Format      string          `json:"format,omitempty"`
+	MediaType   string          `json:"media_type"`
 	Raw         json.RawMessage `json:"-"`
 	DownloadURL string          `json:"-"`
 	ExpiresAt   time.Time       `json:"-"`
@@ -68,6 +72,7 @@ type importJob struct {
 	Current        int    `json:"current"`
 	Total          int    `json:"total"`
 	Error          string `json:"error,omitempty"`
+	Message        string `json:"message,omitempty"`
 	Ready          bool   `json:"ready"`
 	FileName       string `json:"file_name,omitempty"`
 	SubscriptionID string `json:"subscription_id,omitempty"`
@@ -100,6 +105,75 @@ var builtInBookSources = []bookSource{
 	{ID: sonovelBuiltInID, Type: "sonovel", Name: "So Novel 中文聚合（11 个站点）", Group: "中文聚合", URL: "https://github.com/freeok/so-novel", Enabled: true, BuiltIn: true, Searchable: true},
 }
 
+func (source *bookSource) MediaDefaults() {
+	source.Features = []string{"search"}
+	source.Compatibility = map[string]any{"status": "compatible", "reasons": []string{}}
+	source.LoginState = "not_required"
+}
+
+func decorateBookSource(source *bookSource, userID, definition string) {
+	lower := strings.ToLower(definition)
+	features := []string{"search"}
+	reasons := []string{}
+	if strings.Contains(lower, "webview") || strings.Contains(lower, "startbrowser") || strings.Contains(lower, "showbrowser") {
+		features = append(features, "webview")
+		if !webviewHealthy() {
+			reasons = append(reasons, "浏览器服务当前不可用")
+		}
+	}
+	if strings.Contains(definition, `"loginUi"`) || strings.Contains(definition, `"loginUrl"`) {
+		features = append(features, "login")
+	}
+	if strings.Contains(definition, "漫画") || strings.Contains(lower, "<img") {
+		features = append(features, "comic")
+	}
+	for _, api := range []string{"openVideoPlayer", "playTTS", "installApk", "getRealDevice"} {
+		if strings.Contains(definition, api) {
+			reasons = append(reasons, api+" 不受支持")
+		}
+	}
+	if strings.Contains(definition, "Packages") {
+		reasons = append(reasons, "Java 环境探测将使用安全降级结果")
+	}
+	source.Features = features
+	status := "compatible"
+	if len(reasons) > 0 {
+		status = "partial"
+	}
+	source.Compatibility = map[string]any{"status": status, "reasons": reasons}
+	source.LoginState = "unknown"
+	_ = db.QueryRow(`SELECT state FROM book_source_login_state WHERE user_id=? AND source_id=?`, userID, source.ID).Scan(&source.LoginState)
+}
+
+func detectLegadoMediaType(fields map[string]any) string {
+	if value, ok := fields["type"].(float64); ok {
+		switch int(value) {
+		case 1, 32:
+			return "unsupported"
+		case 2, 64:
+			return "comic"
+		case 3, 4:
+			return "unsupported"
+		}
+	}
+	bookURL, _ := fields["bookUrl"].(string)
+	if strings.HasPrefix(bookURL, "data:;base64,") {
+		payload := strings.SplitN(strings.TrimPrefix(bookURL, "data:;base64,"), ",", 2)[0]
+		if decoded, err := base64.StdEncoding.DecodeString(payload); err == nil {
+			var metadata map[string]any
+			if json.Unmarshal(decoded, &metadata) == nil {
+				switch metadata["tab"] {
+				case "漫画":
+					return "comic"
+				case "听书", "短剧", "视频":
+					return "unsupported"
+				}
+			}
+		}
+	}
+	return "text"
+}
+
 func initBookSourceSchema() []string {
 	return []string{
 		`CREATE TABLE IF NOT EXISTS book_sources (
@@ -115,6 +189,13 @@ func initBookSourceSchema() []string {
 			UNIQUE(user_id,type,source_url)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_book_sources_user ON book_sources(user_id,enabled)`,
+		`CREATE TABLE IF NOT EXISTS book_source_login_state (
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			source_id TEXT NOT NULL REFERENCES book_sources(id) ON DELETE CASCADE,
+			state TEXT NOT NULL DEFAULT 'unknown',
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY(user_id,source_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS book_import_jobs (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -158,6 +239,11 @@ func initBookSourceSchema() []string {
 
 func handleBookSourceRoutes(w http.ResponseWriter, r *http.Request) bool {
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/v1/book-browser-sessions"):
+		handleBrowserSessions(w, r)
+	case strings.HasPrefix(r.URL.Path, "/v1/book-source-actions/"):
+		id := strings.TrimSuffix(strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/book-source-actions/"), "/"), "/events")
+		handleSourceActionEvents(w, r, id)
 	case strings.HasPrefix(r.URL.Path, "/v1/book-files/"):
 		handlePersistentBookFile(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/book-sources":
@@ -221,6 +307,9 @@ func handleListBookSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := append([]bookSource{}, builtInBookSources...)
+	for index := range items {
+		items[index].MediaDefaults()
+	}
 	rows, err := db.Query(`SELECT id,type,name,group_name,source_url,enabled,definition,updated_at FROM book_sources WHERE user_id=? ORDER BY name COLLATE NOCASE`, auth.User.ID)
 	if err != nil {
 		writeAPI(w, 500, 500, "读取书源失败", nil)
@@ -236,6 +325,7 @@ func handleListBookSources(w http.ResponseWriter, r *http.Request) {
 		}
 		item.Enabled, item.Searchable = enabled == 1, true
 		item.Definition = json.RawMessage(definition)
+		decorateBookSource(&item, auth.User.ID, definition)
 		items = append(items, item)
 	}
 	writeAPI(w, 200, 200, "success", items)
@@ -332,7 +422,7 @@ func handleImportBookSources(w http.ResponseWriter, r *http.Request) {
 
 func containsForbiddenSourceCode(raw string) bool {
 	lower := strings.ToLower(raw)
-	for _, value := range []string{"packages", "java.lang", "processbuilder", "runtime.getruntime", "classloader", "java.io", "java.nio", `"webview":true`} {
+	for _, value := range []string{"processbuilder", "runtime.getruntime", "classloader", "java.io.file", "java.nio.file", "readfile(", "readtxtfile(", "deletefile(", "unzipfile(", "gettxtinfolder("} {
 		if strings.Contains(strings.ReplaceAll(lower, " ", ""), value) {
 			return true
 		}
@@ -372,8 +462,33 @@ func handleBookSourceItem(w http.ResponseWriter, r *http.Request) {
 	if auth == nil {
 		return
 	}
-	id := strings.TrimPrefix(r.URL.Path, "/v1/book-sources/")
-	if id == "" || strings.Contains(id, "/") {
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/book-sources/"), "/"), "/")
+	id := parts[0]
+	if id == "" {
+		writeAPI(w, 404, 404, "书源不存在", nil)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "profile" && r.Method == http.MethodGet {
+		handleSourceProfile(w, r, auth.User.ID, id)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "actions" && r.Method == http.MethodPost {
+		handleSourceAction(w, r, auth.User.ID, id)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "session" && r.Method == http.MethodDelete {
+		var sourceURL, definition string
+		if db.QueryRow(`SELECT source_url,definition FROM book_sources WHERE id=? AND user_id=?`, id, auth.User.ID).Scan(&sourceURL, &definition) != nil {
+			writeAPI(w, 404, 404, "书源不存在", nil)
+			return
+		}
+		clearBrowserState(r.Context(), auth.User.ID, sourceURL)
+		clearEngineSourceState(r.Context(), auth.User.ID, definition)
+		_, _ = db.Exec(`DELETE FROM book_source_login_state WHERE user_id=? AND source_id=?`, auth.User.ID, id)
+		writeAPI(w, 200, 200, "登录状态已清除", nil)
+		return
+	}
+	if len(parts) != 1 {
 		writeAPI(w, 404, 404, "书源不存在", nil)
 		return
 	}
@@ -409,11 +524,17 @@ func handleBookSourceItem(w http.ResponseWriter, r *http.Request) {
 		_, _ = db.Exec(`UPDATE book_sources SET name=?,group_name=?,enabled=?,updated_at=? WHERE id=? AND user_id=?`, name, group, enabled, time.Now().Unix(), id, auth.User.ID)
 		writeAPI(w, 200, 200, "success", nil)
 	case http.MethodDelete:
+		var sourceURL, definition string
+		_ = db.QueryRow(`SELECT source_url,definition FROM book_sources WHERE id=? AND user_id=?`, id, auth.User.ID).Scan(&sourceURL, &definition)
 		result, _ := db.Exec(`DELETE FROM book_sources WHERE id=? AND user_id=?`, id, auth.User.ID)
 		rows, _ := result.RowsAffected()
 		if rows == 0 {
 			writeAPI(w, 404, 404, "书源不存在", nil)
 			return
+		}
+		if sourceURL != "" {
+			clearBrowserState(r.Context(), auth.User.ID, sourceURL)
+			clearEngineSourceState(r.Context(), auth.User.ID, definition)
 		}
 		writeAPI(w, 200, 200, "success", nil)
 	default:
@@ -533,7 +654,9 @@ func loadSelectedSources(userID string, ids []string) ([]bookSource, error) {
 
 func searchOneSource(ctx context.Context, userID string, source bookSource, keyword string, page int) ([]cachedSearchResult, error) {
 	timeout := 20 * time.Second
-	if source.Type == "sonovel" {
+	if source.Type == "legado" {
+		timeout = 120 * time.Second
+	} else if source.Type == "sonovel" {
 		timeout = 60 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -580,7 +703,7 @@ func searchLegado(ctx context.Context, userID string, source bookSource, keyword
 		if item.Name == "" {
 			continue
 		}
-		items = append(items, cachedSearchResult{ID: randomString(24), UserID: userID, SourceID: source.ID, SourceName: source.Name, SourceType: "legado", Title: item.Name, Authors: nonEmpty(item.Author), Summary: item.Intro, CoverURL: item.CoverURL, Latest: item.Latest, Raw: raw, ExpiresAt: time.Now().Add(searchResultTTL)})
+		items = append(items, cachedSearchResult{ID: randomString(24), UserID: userID, SourceID: source.ID, SourceName: source.Name, SourceType: "legado", Title: item.Name, Authors: nonEmpty(item.Author), Summary: item.Intro, CoverURL: item.CoverURL, Latest: item.Latest, MediaType: detectLegadoMediaType(fields), Raw: raw, ExpiresAt: time.Now().Add(searchResultTTL)})
 	}
 	return items, nil
 }
@@ -726,7 +849,7 @@ func searchOPDS(ctx context.Context, userID string, source bookSource, keyword s
 		if download == "" {
 			continue
 		}
-		items = append(items, cachedSearchResult{ID: randomString(24), UserID: userID, SourceID: source.ID, SourceName: source.Name, SourceType: "opds", Title: entry.Title, Authors: authors, Summary: firstNonEmpty(entry.Summary, entry.Content), CoverURL: cover, Format: format, DownloadURL: download, ExpiresAt: time.Now().Add(searchResultTTL)})
+		items = append(items, cachedSearchResult{ID: randomString(24), UserID: userID, SourceID: source.ID, SourceName: source.Name, SourceType: "opds", Title: entry.Title, Authors: authors, Summary: firstNonEmpty(entry.Summary, entry.Content), CoverURL: cover, Format: format, MediaType: "text", DownloadURL: download, ExpiresAt: time.Now().Add(searchResultTTL)})
 	}
 	return items, nil
 }
@@ -774,7 +897,7 @@ func convertOPDS2Publications(userID string, source bookSource, publications []o
 				cover = image.Href
 			}
 		}
-		items = append(items, cachedSearchResult{ID: randomString(24), UserID: userID, SourceID: source.ID, SourceName: source.Name, SourceType: "opds", Title: title, Authors: authors, Summary: anyString(publication.Metadata.Description), CoverURL: cover, Format: format, DownloadURL: download, ExpiresAt: time.Now().Add(searchResultTTL)})
+		items = append(items, cachedSearchResult{ID: randomString(24), UserID: userID, SourceID: source.ID, SourceName: source.Name, SourceType: "opds", Title: title, Authors: authors, Summary: anyString(publication.Metadata.Description), CoverURL: cover, Format: format, MediaType: "text", DownloadURL: download, ExpiresAt: time.Now().Add(searchResultTTL)})
 	}
 	return items
 }
@@ -942,6 +1065,10 @@ func handleCreateBookImport(w http.ResponseWriter, r *http.Request) {
 	result, ok := getCachedResult(auth.User.ID, body.ResultID)
 	if !ok {
 		writeAPI(w, 404, 404, "搜索结果已失效，请重新搜索", nil)
+		return
+	}
+	if result.MediaType == "unsupported" {
+		writeAPI(w, 422, 422, "当前版本暂不支持听书、短剧或视频离线导入", nil)
 		return
 	}
 	subscriptionID := ""
@@ -1299,19 +1426,33 @@ func readImportJob(userID, id string, refresh bool) (importJob, error) {
 	if err != nil {
 		return job, err
 	}
-	if refresh && sourceType == "legado" && engineID != "" && (job.Status == "queued" || job.Status == "running") {
+	if refresh && sourceType == "legado" && engineID != "" && (job.Status == "queued" || job.Status == "running" || job.Status == "waiting_user") {
 		if remote, err := getEngineJob(engineID); err == nil {
 			job.Status = anyString(remote["status"])
 			job.Stage = anyString(remote["stage"])
 			job.Current = anyInt(remote["current"])
 			job.Total = anyInt(remote["total"])
 			job.Error = anyString(remote["error"])
+			job.Message = anyString(remote["message"])
 			job.UpdatedAt = time.Now().Unix()
 			_, _ = db.Exec(`UPDATE book_import_jobs SET status=?,stage=?,current=?,total=?,error=?,updated_at=? WHERE id=? AND user_id=?`, job.Status, job.Stage, job.Current, job.Total, job.Error, job.UpdatedAt, id, userID)
+			if job.Status == "running" {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				if sessions, listErr := listBrowserSessions(ctx, userID); listErr == nil {
+					for _, session := range sessions {
+						if session.State == "active" {
+							job.Status, job.Stage = "waiting_user", "waiting_user"
+							break
+						}
+					}
+				}
+				cancel()
+			}
 			if job.Status == "ready" && job.SubscriptionID != "" {
 				latestTitle := anyString(remote["latest_chapter"])
 				latestKey := firstNonEmpty(anyString(remote["latest_chapter_url"]), latestTitle)
-				_, _ = db.Exec(`UPDATE book_source_subscriptions SET last_chapter_count=?,last_chapter_key=?,last_chapter_title=?,checked_at=?,updated_at=? WHERE id=? AND user_id=?`, job.Total, latestKey, latestTitle, job.UpdatedAt, job.UpdatedAt, job.SubscriptionID, userID)
+				chapterCount := anyInt(remote["chapter_count"])
+				_, _ = db.Exec(`UPDATE book_source_subscriptions SET last_chapter_count=?,last_chapter_key=?,last_chapter_title=?,checked_at=?,updated_at=? WHERE id=? AND user_id=?`, chapterCount, latestKey, latestTitle, job.UpdatedAt, job.UpdatedAt, job.SubscriptionID, userID)
 			}
 		} else {
 			job.Status, job.Stage, job.Error, job.UpdatedAt = "failed", "failed", "规则引擎已重启，请重新创建导入任务", time.Now().Unix()

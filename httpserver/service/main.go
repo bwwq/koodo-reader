@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	serviceVersion       = "0.5.0"
+	serviceVersion       = "0.6.0"
 	accessTTL            = 15 * time.Minute
 	refreshTTL           = 30 * 24 * time.Hour
 	passwordRounds       = 120000
@@ -96,7 +96,7 @@ func main() {
 		Handler:           http.HandlerFunc(route),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       10 * time.Minute,
-		WriteTimeout:      10 * time.Minute,
+		WriteTimeout:      35 * time.Minute,
 		IdleTimeout:       60 * time.Second,
 	}
 	log.Printf("Koodo self-hosted service %s listening on :%s", serviceVersion, port)
@@ -122,6 +122,9 @@ func serviceCapabilities() []string {
 	capabilities := []string{"sync.data", "sync.koreader", "storage.files", "source.search"}
 	if legadoEngineHealthy() {
 		capabilities = append(capabilities, "source.legado")
+		if webviewHealthy() {
+			capabilities = append(capabilities, "source.webview", "source.comic")
+		}
 	}
 	if sonovelEngineHealthy() {
 		capabilities = append(capabilities, "source.sonovel")

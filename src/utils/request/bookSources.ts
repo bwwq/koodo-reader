@@ -14,6 +14,9 @@ export interface BookSourceItem {
   enabled: boolean;
   built_in?: boolean;
   searchable: boolean;
+  features?: string[];
+  compatibility?: { status: "compatible" | "partial" | "incompatible"; reasons?: string[] };
+  login_state?: "unknown" | "configured" | "not_required";
 }
 
 export interface SourceSearchResult {
@@ -27,6 +30,7 @@ export interface SourceSearchResult {
   cover_url?: string;
   latest_chapter?: string;
   format?: string;
+  media_type: "text" | "comic" | "unsupported";
 }
 
 export interface SourceSearchEvent {
@@ -39,11 +43,12 @@ export interface SourceSearchEvent {
 
 export interface BookImportJob {
   id: string;
-  status: "queued" | "running" | "ready" | "failed" | "cancelled";
+  status: "queued" | "running" | "waiting_user" | "ready" | "failed" | "cancelled";
   stage: string;
   current: number;
   total: number;
   error?: string;
+  message?: string;
   ready: boolean;
   file_name?: string;
   subscription_id?: string;
@@ -193,6 +198,68 @@ export const deleteBookSource = (id: string) =>
   serviceRequest<null>(`/v1/book-sources/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+
+export interface BookSourceProfileField {
+  name: string;
+  type: "text" | "password" | "select" | "checkbox" | "button";
+  value?: string | boolean;
+  options?: Array<string | { label: string; value: string }>;
+  action_id?: string;
+}
+
+export interface BookSourceProfile {
+  fields: BookSourceProfileField[];
+  login_state: string;
+}
+
+export interface BookSourceAction {
+  id: string;
+  status: "queued" | "running" | "ready" | "failed";
+  message?: string;
+  error?: string;
+}
+
+export interface BookBrowserSession {
+  id: string;
+  title: string;
+  url: string;
+  state: "active" | "finished" | "failed" | "cancelled";
+  error?: string;
+  created_at: number;
+  expires_at: number;
+}
+
+export const getBookSourceProfile = (id: string) =>
+  serviceRequest<BookSourceProfile>(`/v1/book-sources/${encodeURIComponent(id)}/profile`);
+
+export const runBookSourceAction = (id: string, actionId: string, values: Record<string, string | boolean>) =>
+  serviceRequest<BookSourceAction>(`/v1/book-sources/${encodeURIComponent(id)}/actions`, {
+    method: "POST",
+    body: JSON.stringify({ action_id: actionId, values }),
+  });
+
+export const watchBookSourceAction = (id: string, onEvent: (action: BookSourceAction) => void) =>
+  serviceStream(`/v1/book-source-actions/${encodeURIComponent(id)}/events`, {}, (data) => onEvent(JSON.parse(data)));
+
+export const clearBookSourceSession = (id: string) =>
+  serviceRequest<null>(`/v1/book-sources/${encodeURIComponent(id)}/session`, { method: "DELETE" });
+
+export const listBookBrowserSessions = () =>
+  serviceRequest<BookBrowserSession[]>("/v1/book-browser-sessions");
+
+export const createBookBrowserTicket = (id: string) =>
+  serviceRequest<{ ticket: string; expires_in: number }>(`/v1/book-browser-sessions/${encodeURIComponent(id)}/ticket`, { method: "POST", body: "{}" });
+
+export const finishBookBrowserSession = (id: string) =>
+  serviceRequest<null>(`/v1/book-browser-sessions/${encodeURIComponent(id)}`, { method: "POST", body: "{}" });
+
+export const cancelBookBrowserSession = (id: string) =>
+  serviceRequest<null>(`/v1/book-browser-sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+export const getBookBrowserWebSocketURL = (id: string, ticket: string) => {
+  const base = getServiceBaseUrl().replace(/^http/i, "ws");
+  return `${base}/v1/book-browser-sessions/${encodeURIComponent(id)}/ws?ticket=${encodeURIComponent(ticket)}`;
+};
 
 export const searchBookSources = (
   keyword: string,
