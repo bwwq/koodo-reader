@@ -64,7 +64,9 @@ internal fun setSourceMessageSink(sink: ((String) -> Unit)?) {
 private val allowedScriptClasses = listOf(
     "io.legado.app.data.entities.",
     "io.legado.app.model.analyzeRule.",
+    "io.legado.app.help.CacheManager",
     "io.legado.app.help.JsExtensions",
+    "io.legado.app.help.http.CookieStore",
     "io.legado.app.help.http.StrResponse",
     "org.jsoup.",
     "java.lang.String",
