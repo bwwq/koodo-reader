@@ -33,8 +33,10 @@ import ProtectionOverlay from "../../components/protection";
 import DatabaseService from "../../utils/storage/databaseService";
 import {
   checkBookSubscription,
+  claimBookImport,
   createBookSubscriptionImport,
   downloadBookImport,
+  getBookImportFormat,
   getCompletedBookImports,
   getTrackedSourceBooks,
   listBookImports,
@@ -156,6 +158,14 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
           },
         });
         if (!importedBookKey) throw new Error("图书未写入本地书架");
+        const claimed = await claimBookImport(
+          job.id,
+          importedBookKey,
+          getBookImportFormat(file)
+        );
+        if (claimed.code !== 200) {
+          throw new Error(claimed.msg || "图书未保存到服务端");
+        }
         markBookImportCompleted(job.id);
         toast.success(`已加入书架：${file.name.replace(/\.epub$/i, "")}`, {
           id: toastId,
@@ -226,6 +236,15 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
           sourceSubscriptionId: subscription.id,
           silent: true,
         });
+        const claimed = await claimBookImport(
+          finalJob.id,
+          bookKey,
+          getBookImportFormat(file)
+        );
+        if (claimed.code !== 200) {
+          throw new Error(claimed.msg || "更新后的图书未保存到服务端");
+        }
+        markBookImportCompleted(finalJob.id);
         updated++;
       } catch (error) {
         console.error("source book update failed", error);

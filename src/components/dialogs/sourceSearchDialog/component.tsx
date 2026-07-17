@@ -8,9 +8,11 @@ import {
   SourceSearchEvent,
   SourceSearchResult,
   cancelBookImport,
+  claimBookImport,
   createBookImport,
   deleteBookSource,
   downloadBookImport,
+  getBookImportFormat,
   importBookSourceContent,
   importBookSourceURL,
   importOPDSSource,
@@ -190,6 +192,15 @@ function SourceSearchDialog(props: Props) {
     });
     if (!importedBookKey) {
       toast.error("图书文件已生成，但加入书架失败；返回书架后会自动重试");
+      return;
+    }
+    const claimed = await claimBookImport(
+      finalJob.id,
+      importedBookKey,
+      getBookImportFormat(file)
+    );
+    if (claimed.code !== 200) {
+      toast.error(claimed.msg || "图书已加入书架，但服务端保存失败；稍后会自动重试");
       return;
     }
     markBookImportCompleted(finalJob.id);

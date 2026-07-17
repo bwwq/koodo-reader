@@ -16,9 +16,14 @@ import { LocalFileManager } from "./localFile";
 declare var window: any;
 
 class BookUtil {
-  static async addBook(key: string, format: string, buffer: ArrayBuffer) {
+  static async addBook(
+    key: string,
+    format: string,
+    buffer: ArrayBuffer,
+    skipUpload: boolean = false
+  ) {
     // for both original books and cached boks
-    if (ConfigService.getItem("defaultSyncOption")) {
+    if (!skipUpload && ConfigService.getItem("defaultSyncOption")) {
       toast.loading(i18n.t("Uploading book"), {
         id: "add-book",
       });
@@ -35,7 +40,7 @@ class BookUtil {
           path.join(dataPath, "book", key + "." + format),
           Buffer.from(buffer)
         );
-        await this.uploadBook(key, format);
+        if (!skipUpload) await this.uploadBook(key, format);
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
@@ -48,7 +53,7 @@ class BookUtil {
       } else {
         await localforage.setItem(key, buffer);
       }
-      await this.uploadBook(key, format);
+      if (!skipUpload) await this.uploadBook(key, format);
     }
   }
   static deleteBook(key: string, format: string) {

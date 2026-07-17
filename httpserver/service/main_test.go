@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -624,6 +625,63 @@ func TestBookImportRecoveryListIsAccountBound(t *testing.T) {
 	}
 	if !strings.Contains(userList.Body.String(), "recover-user-job") || strings.Contains(userList.Body.String(), "recover-admin-job") {
 		t.Fatalf("user import isolation failed: %s", userList.Body.String())
+	}
+}
+
+func TestReadyImportCanBeClaimedAndRecoveredByOwner(t *testing.T) {
+	filesDir := filepath.Join(t.TempDir(), "files")
+	t.Setenv("SERVICE_FILES_DIR", filesDir)
+	openTestDatabase(t)
+	if res := registerAccount(t, "claim-admin", "password-123", ""); res.Code != http.StatusOK {
+		t.Fatalf("bootstrap admin: %d %s", res.Code, res.Body.String())
+	}
+	admin := loginAccount(t, "claim-admin", "password-123")
+	created := request(t, http.MethodPost, "/v1/admin/users", map[string]string{
+		"username": "claim-user", "password": "password-456",
+	}, bearer(admin["access_token"].(string)))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create user: %d %s", created.Code, created.Body.String())
+	}
+	other := loginAccount(t, "claim-user", "password-456")
+
+	var adminID string
+	_ = db.QueryRow(`SELECT id FROM users WHERE username='claim-admin'`).Scan(&adminID)
+	generatedDir := t.TempDir()
+	generatedPath := filepath.Join(generatedDir, "ready.epub")
+	content := []byte("valid generated epub placeholder")
+	if err := os.WriteFile(generatedPath, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	_, err := db.Exec(`INSERT INTO book_import_jobs(id,user_id,source_id,source_type,status,stage,current,total,file_name,file_path,created_at,updated_at,expires_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, "claim-ready-job", adminID, "source", "opds", "ready", "ready", 1, 1, "book.epub", generatedPath, now, now, now+3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claim := request(t, http.MethodPost, "/v1/book-imports/claim-ready-job/claim", map[string]string{
+		"book_key": "1784262554674", "format": "epub",
+	}, bearer(admin["access_token"].(string)))
+	if claim.Code != http.StatusOK {
+		t.Fatalf("claim import: %d %s", claim.Code, claim.Body.String())
+	}
+	recovered := request(t, http.MethodGet, "/v1/book-files/1784262554674?format=epub", nil, bearer(admin["access_token"].(string)))
+	if recovered.Code != http.StatusOK || recovered.Body.String() != string(content) {
+		t.Fatalf("recover claimed import: %d %q", recovered.Code, recovered.Body.String())
+	}
+	isolated := request(t, http.MethodGet, "/v1/book-files/1784262554674?format=epub", nil, bearer(other["access_token"].(string)))
+	if isolated.Code != http.StatusNotFound {
+		t.Fatalf("other account read claimed file: %d %s", isolated.Code, isolated.Body.String())
+	}
+	unauthenticated := request(t, http.MethodGet, "/v1/book-files/1784262554674?format=epub", nil, nil)
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated claimed file: %d", unauthenticated.Code)
+	}
+	invalid := request(t, http.MethodPost, "/v1/book-imports/claim-ready-job/claim", map[string]string{
+		"book_key": "../escape", "format": "epub",
+	}, bearer(admin["access_token"].(string)))
+	if invalid.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid claim key: %d %s", invalid.Code, invalid.Body.String())
 	}
 }
 

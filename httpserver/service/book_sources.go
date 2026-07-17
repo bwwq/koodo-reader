@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -156,6 +157,8 @@ func initBookSourceSchema() []string {
 
 func handleBookSourceRoutes(w http.ResponseWriter, r *http.Request) bool {
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/v1/book-files/"):
+		handlePersistentBookFile(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/book-sources":
 		handleListBookSources(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/book-sources/import":
@@ -1044,6 +1047,10 @@ func handleBookImportItem(w http.ResponseWriter, r *http.Request) {
 		serveImportFile(w, r, auth.User.ID, id)
 		return
 	}
+	if len(parts) == 2 && parts[1] == "claim" && r.Method == http.MethodPost {
+		claimImportFile(w, r, auth.User.ID, id)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		job, err := readImportJob(auth.User.ID, id, true)
@@ -1069,6 +1076,175 @@ func handleBookImportItem(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeAPI(w, 405, 405, "请求方法不支持", nil)
 	}
+}
+
+func validStoredBookPart(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '.' || char == '_' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return value != "." && value != ".."
+}
+
+func normalizeStoredBookFormat(value string) string {
+	value = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "."))
+	switch value {
+	case "epub", "pdf", "txt", "mobi", "azw", "azw3", "cbz":
+		return value
+	default:
+		return ""
+	}
+}
+
+func claimImportFile(w http.ResponseWriter, r *http.Request, userID, id string) {
+	var body struct {
+		BookKey string `json:"book_key"`
+		Format  string `json:"format"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	body.BookKey = strings.TrimSpace(body.BookKey)
+	body.Format = normalizeStoredBookFormat(body.Format)
+	if !validStoredBookPart(body.BookKey) || body.Format == "" {
+		writeAPI(w, 422, 422, "图书标识或格式无效", nil)
+		return
+	}
+	job, err := readImportJob(userID, id, true)
+	if err != nil {
+		writeAPI(w, 404, 404, "任务不存在", nil)
+		return
+	}
+	if job.Status != "ready" {
+		writeAPI(w, 409, 409, "任务尚未完成", nil)
+		return
+	}
+
+	reader, size, err := openReadyImportFile(r.Context(), userID, id)
+	if err != nil {
+		writeAPI(w, 502, 502, err.Error(), nil)
+		return
+	}
+	defer reader.Close()
+	if size > maxGeneratedBookSize {
+		writeAPI(w, 413, 413, "生成文件超过 512 MiB", nil)
+		return
+	}
+	target, err := resolveStoragePath(userID, "book", body.BookKey+"."+body.Format)
+	if err != nil {
+		writeAPI(w, 422, 422, "图书保存路径无效", nil)
+		return
+	}
+	dir := filepath.Dir(target)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		writeAPI(w, 500, 500, "无法创建图书目录", nil)
+		return
+	}
+	temp, err := os.CreateTemp(dir, ".source-book-*")
+	if err != nil {
+		writeAPI(w, 500, 500, "无法保存图书文件", nil)
+		return
+	}
+	tempName := temp.Name()
+	cleanup := func() {
+		_ = temp.Close()
+		_ = os.Remove(tempName)
+	}
+	written, copyErr := io.Copy(temp, io.LimitReader(reader, maxGeneratedBookSize+1))
+	closeErr := temp.Close()
+	if copyErr != nil || closeErr != nil || written > maxGeneratedBookSize {
+		cleanup()
+		writeAPI(w, 502, 502, "保存图书文件失败", nil)
+		return
+	}
+	if err := os.Chmod(tempName, 0600); err != nil {
+		cleanup()
+		writeAPI(w, 500, 500, "无法保护图书文件", nil)
+		return
+	}
+	if err := os.Rename(tempName, target); err != nil {
+		cleanup()
+		writeAPI(w, 500, 500, "无法提交图书文件", nil)
+		return
+	}
+	writeAPI(w, 200, 200, "图书已保存", map[string]any{
+		"book_key": body.BookKey,
+		"format":   body.Format,
+		"size":     written,
+	})
+}
+
+func openReadyImportFile(ctx context.Context, userID, id string) (io.ReadCloser, int64, error) {
+	var sourceType, engineID, path string
+	if err := db.QueryRow(`SELECT source_type,engine_job_id,file_path FROM book_import_jobs WHERE id=? AND user_id=? AND status='ready'`, id, userID).Scan(&sourceType, &engineID, &path); err != nil {
+		return nil, 0, errors.New("生成文件不存在")
+	}
+	if sourceType != "legado" {
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, 0, errors.New("生成文件不存在")
+		}
+		info, err := file.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			file.Close()
+			return nil, 0, errors.New("生成文件无效")
+		}
+		return file, info.Size(), nil
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, legadoEngineURL()+"/internal/imports/"+url.PathEscape(engineID)+"/file", nil)
+	req.Header.Set("X-Engine-Token", os.Getenv("LEGADO_ENGINE_TOKEN"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, 0, errors.New("读取 EPUB 失败")
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, 0, errors.New("EPUB 尚未就绪")
+	}
+	return resp.Body, resp.ContentLength, nil
+}
+
+func handlePersistentBookFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPI(w, 405, 405, "请求方法不支持", nil)
+		return
+	}
+	auth := requireAuth(w, r)
+	if auth == nil {
+		return
+	}
+	bookKey := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/book-files/"), "/")
+	format := normalizeStoredBookFormat(r.URL.Query().Get("format"))
+	if !validStoredBookPart(bookKey) || format == "" {
+		writeAPI(w, 422, 422, "图书标识或格式无效", nil)
+		return
+	}
+	name := bookKey + "." + format
+	target, err := resolveStoragePath(auth.User.ID, "book", name)
+	if err != nil {
+		writeAPI(w, 422, 422, "图书路径无效", nil)
+		return
+	}
+	info, err := os.Stat(target)
+	if err != nil || !info.Mode().IsRegular() {
+		writeAPI(w, 404, 404, "图书文件不存在", nil)
+		return
+	}
+	contentType := mime.TypeByExtension("." + format)
+	if contentType == "" && format == "epub" {
+		contentType = "application/epub+zip"
+	}
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+	http.ServeFile(w, r, target)
 }
 
 func readImportJob(userID, id string, refresh bool) (importJob, error) {

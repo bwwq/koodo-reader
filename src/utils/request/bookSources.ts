@@ -215,6 +215,20 @@ export const cancelBookImport = (jobId: string) =>
     method: "DELETE",
   });
 
+export const getBookImportFormat = (file: File): string => {
+  const match = file.name.toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match?.[1] || "epub";
+};
+
+export const claimBookImport = (jobId: string, bookKey: string, format: string) =>
+  serviceRequest<{ book_key: string; format: string; size: number }>(
+    `/v1/book-imports/${encodeURIComponent(jobId)}/claim`,
+    {
+      method: "POST",
+      body: JSON.stringify({ book_key: bookKey, format }),
+    }
+  );
+
 export const downloadBookImport = async (jobId: string): Promise<File> => {
   const baseUrl = getServiceBaseUrl();
   const token = await getServiceAccessToken();
@@ -229,4 +243,19 @@ export const downloadBookImport = async (jobId: string): Promise<File> => {
   return new File([await response.blob()], decodeURIComponent(fileName), {
     type: response.headers.get("content-type") || "application/epub+zip",
   });
+};
+
+export const downloadStoredSourceBook = async (
+  bookKey: string,
+  format: string
+): Promise<ArrayBuffer> => {
+  const baseUrl = getServiceBaseUrl();
+  const token = await getServiceAccessToken();
+  if (!baseUrl || !token) throw new Error("在线服务登录已失效");
+  const response = await fetch(
+    `${baseUrl}/v1/book-files/${encodeURIComponent(bookKey)}?format=${encodeURIComponent(format)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.arrayBuffer();
 };

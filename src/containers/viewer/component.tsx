@@ -31,6 +31,8 @@ import DatabaseService from "../../utils/storage/databaseService";
 import { getOcrResult, getOcrResultV2 } from "../../utils/request/reader";
 import { BookHelper } from "../../assets/lib/kookit.min";
 import { parseWithSystemOCR } from "../../utils/request/common";
+import { downloadStoredSourceBook } from "../../utils/request/bookSources";
+import toast from "react-hot-toast";
 declare var window: any;
 let lock = false; //prevent from clicking too fasts
 
@@ -226,12 +228,20 @@ class Viewer extends React.Component<ViewerProps, ViewerState> {
       this.state.rendition.removeContent();
     }
     let isCacheExsit = await BookUtil.isBookExist("cache-" + key, "zip", path);
-    BookUtil.fetchBook(
-      isCacheExsit ? "cache-" + key : key,
-      isCacheExsit ? "zip" : format.toLowerCase(),
-      true,
-      path
-    ).then(async (result: any) => {
+    try {
+      let result: any = await BookUtil.fetchBook(
+        isCacheExsit ? "cache-" + key : key,
+        isCacheExsit ? "zip" : format.toLowerCase(),
+        true,
+        path
+      );
+      if (!result && !isCacheExsit) {
+        toast.loading("正在从服务端恢复图书文件…", { id: "restore-source-book" });
+        result = await downloadStoredSourceBook(key, format.toLowerCase());
+        await BookUtil.addBook(key, format.toLowerCase(), result, true);
+        toast.success("图书文件已恢复", { id: "restore-source-book" });
+      }
+      if (!result) throw new Error("图书文件不存在");
       const crop = ConfigService.getObjectConfig(
         this.props.currentBook.key,
         "pdfCrop",
@@ -344,7 +354,16 @@ class Viewer extends React.Component<ViewerProps, ViewerState> {
 
       ConfigService.setListConfig(this.props.currentBook.key, "recentBooks");
       document.title = name + " - Koodo Reader";
-    });
+    } catch (error) {
+      console.error("render book failed", error);
+      toast.error(
+        error instanceof Error && error.message === "图书文件不存在"
+          ? "找不到这本书的文件，请重新导入"
+          : "书籍打开失败，请返回书架后重试",
+        { id: "restore-source-book", duration: 6000 }
+      );
+      this.props.handleReadingState(false);
+    }
   };
 
   handleRest = async (rendition: any) => {
