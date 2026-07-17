@@ -139,6 +139,10 @@ private class SafeWrapFactory : WrapFactory() {
 private val safeWrapFactory = SafeWrapFactory()
 
 private fun configureRhinoContext(context: Context, shutter: ClassShutter) {
+    // Legado sources commonly use ES6 syntax such as template literals,
+    // destructuring and object-property shorthand. Rhino otherwise inherits
+    // the engine's legacy default and rejects valid source rules while parsing.
+    context.languageVersion = Context.VERSION_ES6
     context.optimizationLevel = -1
     context.instructionObserverThreshold = 10_000
     context.wrapFactory = safeWrapFactory

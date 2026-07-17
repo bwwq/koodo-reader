@@ -63,6 +63,15 @@ class RuleEngineTest {
         assertEquals("https://library.example", source.evalJS("sourceBase()"))
         assertEquals("value-1", source.evalJS("java.log(`value-${'$'}{1}`)"))
         assertEquals(true, source.evalJS("function check(value) { return value.includes('ue-'); } check(`value-${'$'}{1}`)"))
+        assertEquals(
+            "book-7:author-9",
+            source.evalJS(
+                "const name = 'book-7'; const author = 'author-9'; " +
+                    "const payload = { name, author }; " +
+                    "const { name: parsedName, author: parsedAuthor } = payload; " +
+                    "`${'$'}{parsedName}:${'$'}{parsedAuthor}`"
+            ).toString()
+        )
         assertEquals("", source.evalJS("cookie.getCookie('https://books.example')"))
         assertEquals(true, source.evalJS("typeof cache.get == 'function' && typeof cache.put == 'function'"))
     }
