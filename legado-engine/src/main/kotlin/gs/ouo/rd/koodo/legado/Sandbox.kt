@@ -8,6 +8,7 @@ import io.legado.app.model.DebugLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.mozilla.javascript.ClassShutter
@@ -112,6 +113,11 @@ private class IsolatedAdapter(private val root: File) : ReaderAdapterInterface {
     private val webviewUrl = (System.getenv("LEGADO_WEBVIEW_URL") ?: "http://legado-webview:9223").trimEnd('/')
     private val webviewToken = System.getenv("LEGADO_WEBVIEW_TOKEN") ?: ""
     private val jsonType = "application/json; charset=utf-8".toMediaType()
+    private val webviewClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(35, TimeUnit.SECONDS)
+        .readTimeout(35, TimeUnit.SECONDS)
+        .build()
 
     private fun browserNamespace(namespace: String): String = namespace.substringBefore("::source:")
 
@@ -207,7 +213,7 @@ private class IsolatedAdapter(private val root: File) : ReaderAdapterInterface {
     private fun request(method: String, path: String, value: Any?): Map<String, Any?> {
         val builder = Request.Builder().url(webviewUrl + path).header("X-Engine-Token", webviewToken)
         if (method == "POST") builder.post(gson.toJson(value).toRequestBody(jsonType)) else builder.get()
-        val response = io.legado.app.help.http.okHttpClient.newCall(builder.build()).execute()
+        val response = webviewClient.newCall(builder.build()).execute()
         response.use {
             val body = it.body?.string().orEmpty()
             if (!it.isSuccessful) {
