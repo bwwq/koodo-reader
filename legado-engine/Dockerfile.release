@@ -1,0 +1,12 @@
+FROM amazoncorretto:8-alpine-jre
+
+RUN addgroup -S legado && adduser -S -G legado legado \
+    && mkdir -p /data/jobs && chown -R legado:legado /data
+COPY build/libs/koodo-legado-engine.jar /app/engine.jar
+USER legado
+VOLUME ["/data"]
+EXPOSE 9080
+ENV LEGADO_PORT=9080 LEGADO_DATA=/data JAVA_TOOL_OPTIONS="-Xms64m -Xmx512m -XX:+UseG1GC"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:9080/health || exit 1
+ENTRYPOINT ["java", "-jar", "/app/engine.jar"]

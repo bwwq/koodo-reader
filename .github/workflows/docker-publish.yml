@@ -54,8 +54,20 @@ jobs:
       - name: Cross-compile Go server (amd64 + arm64)
         working-directory: httpserver
         run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o httpserver-linux-amd64 .
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o httpserver-linux-arm64 .
+          go test ./service
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o service-linux-amd64 ./service
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o service-linux-arm64 ./service
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "7.6.4"
+
+      - name: Build architecture-neutral Legado engine
+        run: |
+          git -C vendor/reader-legado apply ../../legado-engine/patches/reader-legado-webview.patch
+          cd legado-engine
+          gradle --no-daemon test shadowJar
 
       # Install the cosign tool except on PR
       # https://github.com/sigstore/cosign-installer
@@ -125,7 +137,7 @@ jobs:
         uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
         with:
           context: httpserver
-          file: httpserver/Dockerfile.service
+          file: httpserver/Dockerfile.service.release
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.service-meta.outputs.tags }}
@@ -136,8 +148,8 @@ jobs:
       - name: Build and push hardened Legado engine image
         uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
         with:
-          context: .
-          file: legado-engine/Dockerfile
+          context: legado-engine
+          file: legado-engine/Dockerfile.release
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.legado-meta.outputs.tags }}

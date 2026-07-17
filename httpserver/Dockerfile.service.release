@@ -1,0 +1,12 @@
+FROM alpine:3.22
+
+ARG TARGETARCH
+RUN addgroup -S koodo && adduser -S -G koodo koodo && mkdir -p /data && chown -R koodo:koodo /data
+COPY service-linux-${TARGETARCH} /usr/local/bin/koodo-service
+USER koodo
+VOLUME ["/data"]
+EXPOSE 8081
+ENV SERVICE_PORT=8081 SERVICE_DB=/data/service.db
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8081/v1/health || exit 1
+ENTRYPOINT ["/usr/local/bin/koodo-service"]
