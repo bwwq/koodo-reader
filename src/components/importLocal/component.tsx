@@ -303,8 +303,9 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
           let reader = new FileReader();
           reader.onload = async (event) => {
             const file_content = (event.target as any).result;
+            let rendition: any;
             try {
-              let rendition = BookHelper.getRendition(
+              rendition = BookHelper.getRendition(
                 file_content,
                 {
                   format: extension.toUpperCase(),
