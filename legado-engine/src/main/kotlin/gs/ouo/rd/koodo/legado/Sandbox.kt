@@ -26,6 +26,21 @@ private val scriptDeadlineMillis = ThreadLocal<Long>()
 private val rhinoDeadlineKey = Any()
 private val sourceMessageSink = ThreadLocal<((String) -> Unit)?>()
 
+val legadoJsCompatibilityScript = """
+(function () {
+  if (!String.prototype.includes) String.prototype.includes = function (value, start) { return this.indexOf(value, start || 0) !== -1; };
+  if (!String.prototype.startsWith) String.prototype.startsWith = function (value, start) { return this.indexOf(value, start || 0) === (start || 0); };
+  if (!String.prototype.endsWith) String.prototype.endsWith = function (value, length) { var end = length === undefined ? this.length : length; return this.substring(end - value.length, end) === value; };
+  if (!String.prototype.padStart) String.prototype.padStart = function (length, fill) { var value = String(this); var pad = fill === undefined ? ' ' : String(fill); while (value.length < length) value = pad + value; return value.slice(value.length - length); };
+  if (!Array.prototype.includes) Array.prototype.includes = function (value, start) { return this.indexOf(value, start || 0) !== -1; };
+  if (!Array.prototype.find) Array.prototype.find = function (callback, self) { for (var i = 0; i < this.length; i++) if (callback.call(self, this[i], i, this)) return this[i]; };
+  if (!Array.prototype.findIndex) Array.prototype.findIndex = function (callback, self) { for (var i = 0; i < this.length; i++) if (callback.call(self, this[i], i, this)) return i; return -1; };
+  if (!Object.values) Object.values = function (value) { return Object.keys(value).map(function (key) { return value[key]; }); };
+  if (!Object.entries) Object.entries = function (value) { return Object.keys(value).map(function (key) { return [key, value[key]]; }); };
+  if (!Object.assign) Object.assign = function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] || {}; Object.keys(source).forEach(function (key) { target[key] = source[key]; }); } return target; };
+})();
+""".trimIndent()
+
 internal fun <T> withRhinoDeadline(timeoutMillis: Long, block: () -> T): T {
     scriptDeadlineMillis.set(timeoutMillis)
     return try { block() } finally { scriptDeadlineMillis.remove() }

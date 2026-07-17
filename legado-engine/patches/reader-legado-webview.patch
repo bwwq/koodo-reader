@@ -32,7 +32,7 @@ index d17ea37..0f7aa3d 100644
 -        return cacheInstance.get("sourceVariable_${getKey()}")
 +        return cacheInstance.get("sourceVariable_${getKey()}") ?: "{}"
      }
-@@ -167,6 +167,10 @@ interface BaseSource : JsExtensions {
+@@ -167,6 +167,11 @@ interface BaseSource : JsExtensions {
          bindings["baseUrl"] = getKey()
          bindings["cookie"] = CookieStore(getUserNameSpace())
          bindings["cache"] = CacheManager(getUserNameSpace())
@@ -40,7 +40,8 @@ index d17ea37..0f7aa3d 100644
 +        val library = (this as? BookSource)?.jsLib
 +        val compatibleLibrary = library?.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
 +        val compatibleScript = jsStr.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
-+        val script = if (compatibleLibrary.isNullOrBlank()) compatibleScript else "$compatibleLibrary\n$compatibleScript"
++        val sourceScript = if (compatibleLibrary.isNullOrBlank()) compatibleScript else "$compatibleLibrary\n$compatibleScript"
++        val script = "${gs.ouo.rd.koodo.legado.legadoJsCompatibilityScript}\n$sourceScript"
 +        return AppConst.SCRIPT_ENGINE.eval(script, bindings)
      }
 -}
@@ -275,7 +276,7 @@ diff --git a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt b/src/
 index 2cc200e..f41c96a 100644
 --- a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt
 +++ b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt
-@@ -659,7 +659,11 @@ class AnalyzeRule(
+@@ -659,7 +659,12 @@ class AnalyzeRule(
          bindings["title"] = chapter?.title
          bindings["src"] = content
          bindings["nextChapterUrl"] = nextChapterUrl
@@ -283,7 +284,8 @@ index 2cc200e..f41c96a 100644
 +        val library = (source as? io.legado.app.data.entities.BookSource)?.jsLib
 +        val compatibleLibrary = library?.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
 +        val compatibleScript = jsStr.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
-+        val script = if (compatibleLibrary.isNullOrBlank()) compatibleScript else "$compatibleLibrary\n$compatibleScript"
++        val sourceScript = if (compatibleLibrary.isNullOrBlank()) compatibleScript else "$compatibleLibrary\n$compatibleScript"
++        val script = "${gs.ouo.rd.koodo.legado.legadoJsCompatibilityScript}\n$sourceScript"
 +        return SCRIPT_ENGINE.eval(script, bindings)
      }
 
@@ -310,7 +312,7 @@ diff --git a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt b/src/m
 index 77b8231..4fc3419 100644
 --- a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
 +++ b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeUrl.kt
-@@ -250,7 +250,11 @@ class AnalyzeUrl(
+@@ -250,7 +250,12 @@ class AnalyzeUrl(
          bindings["book"] = ruleData as? Book
          bindings["source"] = source
          bindings["result"] = result
@@ -318,12 +320,13 @@ index 77b8231..4fc3419 100644
 +        val library = (source as? io.legado.app.data.entities.BookSource)?.jsLib
 +        val compatibleLibrary = library?.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
 +        val compatibleScript = jsStr.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
-+        val script = if (compatibleLibrary.isNullOrBlank()) compatibleScript else "$compatibleLibrary\n$compatibleScript"
++        val sourceScript = if (compatibleLibrary.isNullOrBlank()) compatibleScript else "$compatibleLibrary\n$compatibleScript"
++        val script = "${gs.ouo.rd.koodo.legado.legadoJsCompatibilityScript}\n$sourceScript"
 +        return SCRIPT_ENGINE.eval(script, bindings)
      }
 
      fun put(key: String, value: String): String {
-@@ -351,5 +355,6 @@ class AnalyzeUrl(
+@@ -351,5 +356,6 @@ class AnalyzeUrl(
          if (type != null) {
 -            return StrResponse(url, StringUtils.byteToHexString(getByteArrayAwait()))
 +            val responseUrl = url.takeIf { it.isAbsUrl() } ?: baseUrl.takeIf { it.isAbsUrl() } ?: "https://legado.invalid/data"
@@ -331,7 +334,7 @@ index 77b8231..4fc3419 100644
          }
          val concurrentRecord = fetchStart()
          setCookie(source?.getKey())
-@@ -474,5 +479,5 @@ class AnalyzeUrl(
+@@ -474,5 +480,5 @@ class AnalyzeUrl(
          @Suppress("RegExpRedundantEscape")
 -        val dataUriFindResult = dataUriRegex.find(urlNoQuery)
 +        val dataUriFindResult = dataUriRegex.find(urlNoQuery.replace("\r", "").replace("\n", ""))

@@ -60,6 +60,7 @@ class RuleEngineTest {
 
         assertEquals("https://library.example", source.evalJS("sourceBase()"))
         assertEquals("value-1", source.evalJS("java.log(`value-${'$'}{1}`)"))
+        assertEquals(true, source.evalJS("`value-${'$'}{1}`.includes('ue-')"))
     }
 
     @Test
