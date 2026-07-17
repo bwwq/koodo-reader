@@ -3,7 +3,9 @@ package gs.ouo.rd.koodo.legado
 import com.sun.net.httpserver.HttpServer
 import io.legado.app.data.entities.BookSource
 import io.legado.app.data.entities.rule.SearchRule
+import io.legado.app.model.analyzeRule.AnalyzeRule
 import io.legado.app.model.analyzeRule.AnalyzeUrl
+import io.legado.app.model.analyzeRule.RuleData
 import io.legado.app.model.webBook.WebBook
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -88,19 +90,17 @@ class RuleEngineTest {
     @Test
     fun keepsStringMethodsWhenTemplateValuesEnterSearchRules() {
         installSandbox()
-        val payload = Base64.getEncoder().encodeToString("{\"key\":\"Koodo\"}".toByteArray())
         val source = BookSource(
             bookSourceUrl = "https://books.example",
             bookSourceName = "Template search source",
-            jsLib = "function request(url) { return url.includes('/search?'); }",
-            searchUrl = "data:;base64,$payload,{\"type\":\"gysearch\"}",
-            ruleSearch = SearchRule(
-                bookList = "<js>var res = JSON.parse(java.hexDecodeToString(result)); var url = `/search?title=${'$'}{res.key}`; request(url); [];</js>"
-            )
+            jsLib = "function request(url) { return url.includes('/search?'); }"
         )
+        val rule = AnalyzeRule(RuleData(), source)
 
-        val books = runBlocking { WebBook(source, debugLog = false).searchBook("Koodo", 1) }
-        assertTrue(books.isEmpty())
+        assertEquals(
+            true,
+            rule.evalJS("var url = `/search?title=${'$'}{result}`; request(url);", "Koodo")
+        )
     }
 
     @Test
