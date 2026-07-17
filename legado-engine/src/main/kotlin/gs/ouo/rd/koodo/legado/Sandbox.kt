@@ -15,6 +15,8 @@ import org.mozilla.javascript.ClassShutter
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.ContextFactory
 import org.mozilla.javascript.EvaluatorException
+import org.mozilla.javascript.Scriptable
+import org.mozilla.javascript.WrapFactory
 import java.io.File
 import java.net.URLEncoder
 import java.net.URLDecoder
@@ -118,9 +120,26 @@ private val deadlineContextFactory = DeadlineContextFactory()
 private val contextFactoryField = Context::class.java.getDeclaredField("factory").apply { isAccessible = true }
 private val classShutterField = Context::class.java.getDeclaredField("classShutter").apply { isAccessible = true }
 
+private class SafeWrapFactory : WrapFactory() {
+    init {
+        isJavaPrimitiveWrap = false
+    }
+
+    override fun wrap(cx: Context, scope: Scriptable, obj: Any?, staticType: Class<*>?): Any? {
+        // Rhino represents template-literal concatenations as ConsString. Treat
+        // every CharSequence as a JavaScript string so String.prototype APIs
+        // remain available when the value crosses a function boundary.
+        if (obj is CharSequence) return obj.toString()
+        return super.wrap(cx, scope, obj, staticType)
+    }
+}
+
+private val safeWrapFactory = SafeWrapFactory()
+
 private fun configureRhinoContext(context: Context, shutter: ClassShutter) {
     context.optimizationLevel = -1
     context.instructionObserverThreshold = 10_000
+    context.wrapFactory = safeWrapFactory
     classShutterField.set(context, shutter)
     contextFactoryField.set(context, deadlineContextFactory)
     context.putThreadLocal(

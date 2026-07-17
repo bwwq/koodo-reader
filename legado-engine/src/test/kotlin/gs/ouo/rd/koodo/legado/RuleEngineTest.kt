@@ -86,6 +86,24 @@ class RuleEngineTest {
     }
 
     @Test
+    fun keepsStringMethodsWhenTemplateValuesEnterSearchRules() {
+        installSandbox()
+        val payload = Base64.getEncoder().encodeToString("{\"key\":\"Koodo\"}".toByteArray())
+        val source = BookSource(
+            bookSourceUrl = "https://books.example",
+            bookSourceName = "Template search source",
+            jsLib = "function request(url) { return url.includes('/search?'); }",
+            searchUrl = "data:;base64,$payload,{\"type\":\"gysearch\"}",
+            ruleSearch = SearchRule(
+                bookList = "<js>var res = JSON.parse(java.hexDecodeToString(result)); var url = `/search?title=${'$'}{res.key}`; request(url); [];</js>"
+            )
+        )
+
+        val books = runBlocking { WebBook(source, debugLog = false).searchBook("Koodo", 1) }
+        assertTrue(books.isEmpty())
+    }
+
+    @Test
     fun searchesCssRulesWithKeywordPageAndHeaders() {
         installSandbox()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
