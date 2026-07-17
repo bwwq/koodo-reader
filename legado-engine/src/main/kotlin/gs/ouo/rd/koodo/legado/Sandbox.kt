@@ -161,8 +161,10 @@ internal fun legadoCompatibleJavaScript(script: String, convertObjectShorthand: 
     }
     if (!convertObjectShorthand) return compatible
     return Regex("(=\\s*\\{)([^{}]*)(})").replace(compatible) { match ->
-        val fields = match.groupValues[2].split(',').map { raw ->
+        val rawFields = match.groupValues[2].split(',')
+        val fields = rawFields.mapIndexedNotNull { index, raw ->
             val trimmed = raw.trim()
+            if (trimmed.isEmpty() && index == rawFields.lastIndex) return@mapIndexedNotNull null
             if (trimmed.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*"))) {
                 raw.replace(trimmed, "$trimmed: $trimmed")
             } else raw

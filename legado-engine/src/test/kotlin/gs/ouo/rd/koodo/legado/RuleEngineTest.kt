@@ -70,7 +70,7 @@ class RuleEngineTest {
                 """
                 const name = 'book-7';
                 const author = 'author-9';
-                const payload = { name, author };
+                const payload = { name, author, };
                 const { name: parsedName, author: parsedAuthor } = payload;
                 `${'$'}{parsedName}:${'$'}{parsedAuthor}`
                 """.trimIndent()
