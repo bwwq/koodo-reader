@@ -19,7 +19,7 @@ services:
         condition: service_healthy
       sonovel-engine:
         condition: service_healthy
-    security_opt: [no-new-privileges:true]
+    security_opt: [no-new-privileges:true, seccomp=unconfined]
     cap_drop: [ALL]
 
   legado-engine:
@@ -41,13 +41,14 @@ services:
     cpus: 2
     mem_limit: 768m
     pids_limit: 256
-    security_opt: [no-new-privileges:true]
+    security_opt: [no-new-privileges:true, seccomp=unconfined]
     cap_drop: [ALL]
 
   sonovel-engine:
     image: ghcr.io/freeok/sonovel:1.11.0
     container_name: koodo-sonovel-engine
     restart: unless-stopped
+    user: "10001:10001"
     environment:
       JAVA_OPTS: -Dmode=web -Xms64m -Xmx512m -XX:+ExitOnOutOfMemoryError
     volumes:
@@ -56,11 +57,11 @@ services:
     networks: [koodo]
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=128m
+      - /tmp:rw,noexec,nosuid,size=128m,uid=10001,gid=10001
     cpus: 2
     mem_limit: 768m
     pids_limit: 256
-    security_opt: [no-new-privileges:true]
+    security_opt: [no-new-privileges:true, seccomp=unconfined]
     cap_drop: [ALL]
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/7765'"]
