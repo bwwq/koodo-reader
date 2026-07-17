@@ -35,8 +35,11 @@ import {
   checkBookSubscription,
   createBookSubscriptionImport,
   downloadBookImport,
+  getCompletedBookImports,
   getTrackedSourceBooks,
+  listBookImports,
   listBookSubscriptions,
+  markBookImportCompleted,
   untrackSourceBook,
   watchBookImport,
 } from "../../utils/request/bookSources";
@@ -119,8 +122,53 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
         this.props.history.push("/manager/shelf");
       }
     }
-    void this.refreshSourceBooks();
+    void this.resumeSourceImports().finally(() => this.refreshSourceBooks());
   }
+
+  resumeSourceImports = async () => {
+    const response = await listBookImports();
+    if (response.code !== 200 || !response.data?.length) return;
+    const completed = new Set(getCompletedBookImports());
+    const pending = response.data.filter((job) => !completed.has(job.id));
+    if (!pending.length) return;
+
+    const toastId = "source-import-recovery";
+    for (const candidate of pending) {
+      let job = candidate;
+      if (job.status === "queued" || job.status === "running") {
+        const watched = await watchBookImport(job.id, (next) => {
+          job = next;
+          const progress = next.total ? ` ${next.current}/${next.total}` : "";
+          const stage = sourceUpdateStageLabels[next.stage] || "正在处理";
+          toast.loading(`后台导入：${stage}${progress}`, { id: toastId });
+        });
+        if (watched.code !== 200) continue;
+      }
+      if (job.status !== "ready") continue;
+      try {
+        toast.loading("后台任务已完成，正在加入书架…", { id: toastId });
+        const file = await downloadBookImport(job.id);
+        let importedBookKey = "";
+        await this.props.importBookFunc(file, {
+          sourceSubscriptionId: job.subscription_id,
+          onImported: (bookKey) => {
+            importedBookKey = bookKey;
+          },
+        });
+        if (!importedBookKey) throw new Error("图书未写入本地书架");
+        markBookImportCompleted(job.id);
+        toast.success(`已加入书架：${file.name.replace(/\.epub$/i, "")}`, {
+          id: toastId,
+        });
+      } catch (error) {
+        console.error("resume source import failed", error);
+        toast.error("后台图书已生成，但加入书架失败；刷新后会重试", {
+          id: toastId,
+          duration: 5000,
+        });
+      }
+    }
+  };
 
   refreshSourceBooks = async () => {
     if (this.sourceRefreshStarted) return;

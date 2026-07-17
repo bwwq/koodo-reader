@@ -582,6 +582,51 @@ func TestBookSubscriptionsAreStableAndAccountBound(t *testing.T) {
 	}
 }
 
+func TestBookImportRecoveryListIsAccountBound(t *testing.T) {
+	openTestDatabase(t)
+	if res := registerAccount(t, "imports-admin", "password-123", ""); res.Code != http.StatusOK {
+		t.Fatalf("bootstrap admin: %d %s", res.Code, res.Body.String())
+	}
+	admin := loginAccount(t, "imports-admin", "password-123")
+	created := request(t, http.MethodPost, "/v1/admin/users", map[string]string{
+		"username": "imports-user", "password": "password-456",
+	}, bearer(admin["access_token"].(string)))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create user: %d %s", created.Code, created.Body.String())
+	}
+	user := loginAccount(t, "imports-user", "password-456")
+
+	var adminID, userID string
+	_ = db.QueryRow(`SELECT id FROM users WHERE username='imports-admin'`).Scan(&adminID)
+	_ = db.QueryRow(`SELECT id FROM users WHERE username='imports-user'`).Scan(&userID)
+	now := time.Now().Unix()
+	for _, item := range []struct {
+		id, owner string
+	}{
+		{"recover-admin-job", adminID},
+		{"recover-user-job", userID},
+	} {
+		_, err := db.Exec(`INSERT INTO book_import_jobs(id,user_id,source_id,source_type,status,stage,current,total,created_at,updated_at,expires_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, item.id, item.owner, "source", "legado", "ready", "ready", 12, 12, now, now, now+3600)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	unauthenticated := request(t, http.MethodGet, "/v1/book-imports", nil, nil)
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated import list: %d", unauthenticated.Code)
+	}
+	adminList := request(t, http.MethodGet, "/v1/book-imports", nil, bearer(admin["access_token"].(string)))
+	userList := request(t, http.MethodGet, "/v1/book-imports", nil, bearer(user["access_token"].(string)))
+	if !strings.Contains(adminList.Body.String(), "recover-admin-job") || strings.Contains(adminList.Body.String(), "recover-user-job") {
+		t.Fatalf("admin import isolation failed: %s", adminList.Body.String())
+	}
+	if !strings.Contains(userList.Body.String(), "recover-user-job") || strings.Contains(userList.Body.String(), "recover-admin-job") {
+		t.Fatalf("user import isolation failed: %s", userList.Body.String())
+	}
+}
+
 func TestOPDS2ResultsUseRealOpenAccessAcquisition(t *testing.T) {
 	var feed opds2Feed
 	err := json.Unmarshal([]byte(`{

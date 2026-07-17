@@ -15,6 +15,7 @@ import {
   importBookSourceURL,
   importOPDSSource,
   listBookSources,
+  markBookImportCompleted,
   searchBookSources,
   updateBookSource,
   watchBookImport,
@@ -180,9 +181,18 @@ function SourceSearchDialog(props: Props) {
       return null;
     });
     if (!file) return;
+    let importedBookKey = "";
     await props.importBookFunc(file, {
       sourceSubscriptionId: finalJob.subscription_id,
+      onImported: (bookKey) => {
+        importedBookKey = bookKey;
+      },
     });
+    if (!importedBookKey) {
+      toast.error("图书文件已生成，但加入书架失败；返回书架后会自动重试");
+      return;
+    }
+    markBookImportCompleted(finalJob.id);
     toast.success("图书已导入书架");
     setJob(null);
   };

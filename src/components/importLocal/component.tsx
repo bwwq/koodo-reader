@@ -121,7 +121,11 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
     BookUtil.redirectBook(book);
     this.props.history.push("/manager/home");
   };
-  handleAddBook = (book: BookModel, buffer: ArrayBuffer) => {
+  handleAddBook = (
+    book: BookModel,
+    buffer: ArrayBuffer,
+    options: BookImportOptions = {}
+  ) => {
     return new Promise<void>(async (resolve) => {
       toast.loading(
         this.props.t("Importing") + ": " + book.name.substring(0, 50),
@@ -170,6 +174,10 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
       ConfigService.setListConfig(book.key, "recentBooks");
       DatabaseService.saveRecord(book, "books")
         .then(() => {
+          if (options.sourceSubscriptionId) {
+            trackSourceBook(options.sourceSubscriptionId, book.key);
+          }
+          options.onImported?.(book.key);
           this.props.handleFetchBooks();
           if (this.props.mode === "shelf") {
             ConfigService.setMapConfig(
@@ -259,22 +267,21 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
         : await BookUtil.getBookByMd5(md5);
       if (repeatBook) {
         isRepeat = true;
-        if (this.props.books && this.props.books.length > 0) {
-          this.props.books.forEach((item) => {
-            if (item.key === repeatBook!.key) {
-              toast.error(this.props.t("Duplicate book"));
-              return resolve();
-            }
-          });
+        if (this.props.books?.some((item) => item.key === repeatBook!.key)) {
+          toast.error(this.props.t("Duplicate book"));
+          if (options.sourceSubscriptionId) {
+            trackSourceBook(options.sourceSubscriptionId, repeatBook.key);
+          }
+          options.onImported?.(repeatBook.key);
+          return resolve();
         }
-        if (this.props.deletedBooks && this.props.deletedBooks.length > 0) {
-          this.props.deletedBooks.forEach((item) => {
-            if (item.key === repeatBook!.key) {
-              toast.error(this.props.t("Duplicate book in trash bin"));
-              return resolve();
-            }
-          });
+        if (
+          this.props.deletedBooks?.some((item) => item.key === repeatBook!.key)
+        ) {
+          toast.error(this.props.t("Duplicate book in trash bin"));
+          return resolve();
         }
+        options.onImported?.(repeatBook.key);
         return resolve();
       }
       if (!isRepeat) {
@@ -380,6 +387,7 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
               if (options.sourceSubscriptionId) {
                 trackSourceBook(options.sourceSubscriptionId, result.key);
               }
+              options.onImported?.(result.key);
               this.props.handleFetchBooks();
               toast.success("书源更新完成：" + result.name.substring(0, 50), {
                 id: "source-book-update",
@@ -389,12 +397,9 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
 
             await this.handleAddBook(
               result as BookModel,
-              file_content as ArrayBuffer
+              file_content as ArrayBuffer,
+              options
             );
-            if (options.sourceSubscriptionId) {
-              trackSourceBook(options.sourceSubscriptionId, result.key);
-            }
-
             return resolve();
           };
           reader.readAsArrayBuffer(file);

@@ -53,6 +53,7 @@ export interface BookImportOptions {
   sourceSubscriptionId?: string;
   replaceBookKey?: string;
   silent?: boolean;
+  onImported?: (bookKey: string) => void;
 }
 
 export type ImportBookFunction = (
@@ -80,6 +81,7 @@ export interface BookSubscriptionCheck {
 }
 
 const TRACKED_BOOKS_KEY = "source-book-subscriptions-v1";
+const COMPLETED_IMPORTS_KEY = "source-book-imports-completed-v1";
 
 export const getTrackedSourceBooks = (): Record<string, string> => {
   try {
@@ -101,6 +103,25 @@ export const untrackSourceBook = (subscriptionId: string) => {
   const tracked = getTrackedSourceBooks();
   delete tracked[subscriptionId];
   localStorage.setItem(TRACKED_BOOKS_KEY, JSON.stringify(tracked));
+};
+
+export const getCompletedBookImports = (): string[] => {
+  try {
+    const value = JSON.parse(localStorage.getItem(COMPLETED_IMPORTS_KEY) || "[]");
+    return Array.isArray(value) ? value.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+};
+
+export const markBookImportCompleted = (jobId: string) => {
+  if (!jobId) return;
+  const completed = getCompletedBookImports();
+  if (!completed.includes(jobId)) completed.push(jobId);
+  localStorage.setItem(
+    COMPLETED_IMPORTS_KEY,
+    JSON.stringify(completed.slice(-100))
+  );
 };
 
 export const listBookSources = () =>
@@ -160,6 +181,9 @@ export const createBookImport = (resultId: string) =>
     method: "POST",
     body: JSON.stringify({ result_id: resultId }),
   });
+
+export const listBookImports = () =>
+  serviceRequest<BookImportJob[]>("/v1/book-imports");
 
 export const listBookSubscriptions = () =>
   serviceRequest<BookSubscription[]>("/v1/book-subscriptions");

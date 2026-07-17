@@ -221,6 +221,20 @@ class ConfigUtil {
       this.providerMirrorTypes.delete(type);
     }
     if (Object.keys(this.updateData).length > 0) {
+      // Some upload-only sync tasks do not read the corresponding remote item
+      // first. Resolve that missing baseline immediately before the optimistic
+      // write so an existing item is not mistaken for a concurrent change.
+      for (const type of Object.keys(this.updateData)) {
+        if (!Object.prototype.hasOwnProperty.call(this.onlineVersions, type)) {
+          const current = await getOnlineSyncItem(type);
+          const version =
+            current.code === 200 && current.data
+              ? Number(current.data.version) || 0
+              : 0;
+          this.onlineVersions[type] = version;
+          this.updateVersions[type] = version;
+        }
+      }
       const response = await putOnlineSyncItems(
         this.updateData,
         this.updateVersions

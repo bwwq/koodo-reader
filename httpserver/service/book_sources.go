@@ -168,6 +168,8 @@ func handleBookSourceRoutes(w http.ResponseWriter, r *http.Request) bool {
 		handleListBookSubscriptions(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/book-subscriptions/"):
 		handleBookSubscriptionItem(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/book-imports":
+		handleListBookImports(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/book-imports":
 		handleCreateBookImport(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/book-imports/"):
@@ -176,6 +178,37 @@ func handleBookSourceRoutes(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+func handleListBookImports(w http.ResponseWriter, r *http.Request) {
+	auth := requireAuth(w, r)
+	if auth == nil {
+		return
+	}
+	rows, err := db.Query(`SELECT id FROM book_import_jobs
+		WHERE user_id=? AND expires_at>? AND status IN ('queued','running','ready')
+		ORDER BY created_at ASC LIMIT 20`, auth.User.ID, time.Now().Unix())
+	if err != nil {
+		writeAPI(w, 500, 500, "读取导入任务失败", nil)
+		return
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	items := make([]importJob, 0, len(ids))
+	for _, id := range ids {
+		if job, readErr := readImportJob(auth.User.ID, id, true); readErr == nil &&
+			(job.Status == "queued" || job.Status == "running" || job.Status == "ready") {
+			items = append(items, job)
+		}
+	}
+	writeAPI(w, 200, 200, "success", items)
 }
 
 func handleListBookSources(w http.ResponseWriter, r *http.Request) {
