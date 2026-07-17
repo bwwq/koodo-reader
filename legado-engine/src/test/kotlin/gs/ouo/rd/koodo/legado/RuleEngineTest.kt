@@ -65,14 +65,15 @@ class RuleEngineTest {
         assertEquals("value-1", source.evalJS("java.log(`value-${'$'}{1}`)"))
         assertEquals(true, source.evalJS("function check(value) { return value.includes('ue-'); } check(`value-${'$'}{1}`)"))
         assertEquals(
-            "book-7:author-9",
+            "book-7:author-9:summary",
             source.evalJS(
                 """
                 const name = 'book-7';
                 const author = 'author-9';
-                const payload = { name, author, };
+                const abstract = 'summary';
+                const payload = { name, author, abstract, };
                 const { name: parsedName, author: parsedAuthor } = payload;
-                `${'$'}{parsedName}:${'$'}{parsedAuthor}`
+                `${'$'}{parsedName}:${'$'}{parsedAuthor}:${'$'}{payload["abstract"]}`
                 """.trimIndent()
             ).toString()
         )
@@ -95,8 +96,8 @@ class RuleEngineTest {
         assertFalse(converted.contains("{ source:sources, book_id }"))
         assertFalse(converted.contains("const "))
         assertFalse(converted.contains("let "))
-        assertTrue(converted.contains("var sources = __legado_destructure_0.source"))
-        assertTrue(converted.contains("var book_id = __legado_destructure_0.book_id"))
+        assertTrue(converted.contains("var sources = __legado_destructure_0[\"source\"]"))
+        assertTrue(converted.contains("var book_id = __legado_destructure_0[\"book_id\"]"))
     }
 
     @Test

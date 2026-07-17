@@ -155,7 +155,7 @@ internal fun legadoCompatibleJavaScript(script: String, convertObjectShorthand: 
             val target = pair.getOrElse(1) { property }
             if (!property.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*")) ||
                 !target.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*"))) return@mapNotNull null
-            "$indent" + "var $target = $source.$property;"
+            "$indent" + "var $target = $source[\"$property\"];"
         }
         "$indent" + "var $source = ${match.groupValues[3].trim()};\n" + declarations.joinToString("\n")
     }
@@ -166,7 +166,7 @@ internal fun legadoCompatibleJavaScript(script: String, convertObjectShorthand: 
             val trimmed = raw.trim()
             if (trimmed.isEmpty() && index == rawFields.lastIndex) return@mapIndexedNotNull null
             if (trimmed.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*"))) {
-                raw.replace(trimmed, "$trimmed: $trimmed")
+                raw.replace(trimmed, "\"$trimmed\": $trimmed")
             } else raw
         }
         match.groupValues[1] + fields.joinToString(",") + match.groupValues[3]
