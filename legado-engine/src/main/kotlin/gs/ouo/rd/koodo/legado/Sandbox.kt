@@ -138,6 +138,9 @@ private class SafeWrapFactory : WrapFactory() {
 
 private val safeWrapFactory = SafeWrapFactory()
 
+internal fun legadoCompatibleLibraryJavaScript(script: String): String =
+    script.replace(Regex("(?m)^(?:const|let)(?=\\s)"), "var")
+
 internal fun legadoCompatibleJavaScript(script: String, convertObjectShorthand: Boolean = true): String {
     var compatible = script.replace(Regex("(?m)^([ \\t]*)(?:const|let)(?=\\s)"), "$1var")
     var destructuringIndex = 0
