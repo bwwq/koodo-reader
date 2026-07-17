@@ -64,6 +64,8 @@ jobs:
           gradle-version: "7.6.4"
 
       - name: Build architecture-neutral Legado engine
+        env:
+          LEGADO_ALLOWED_PRIVATE_HOSTS: 127.0.0.1
         run: |
           git -C vendor/reader-legado apply ../../legado-engine/patches/reader-legado-webview.patch
           cd legado-engine
