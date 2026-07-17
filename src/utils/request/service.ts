@@ -79,6 +79,7 @@ const LEGACY_AUTH_KEY = "is_authed";
 
 let refreshPromise: Promise<boolean> | null = null;
 let capabilityCache: ServiceHealth | null = null;
+let sessionGeneration = 0;
 
 export const normalizeServiceBaseUrl = (value: string): string => {
   const trimmed = value.trim().replace(/\/+$/, "");
@@ -145,15 +146,20 @@ const saveSession = async (payload: TokenPayload) => {
 };
 
 export const clearServiceSession = async () => {
-  await Promise.all([
-    TokenService.deleteToken(ACCESS_TOKEN_KEY),
-    TokenService.deleteToken(REFRESH_TOKEN_KEY),
-    TokenService.deleteToken(TOKEN_EXPIRES_KEY),
-    TokenService.deleteToken(USER_KEY),
-    TokenService.deleteToken(LEGACY_AUTH_KEY),
-    TokenService.deleteToken("access_token"),
-    TokenService.deleteToken("refresh_token"),
-  ]);
+  sessionGeneration++;
+  // TokenService rewrites one encrypted token object for every operation.
+  // Parallel deletes race and can restore keys removed by another delete.
+  for (const key of [
+    ACCESS_TOKEN_KEY,
+    REFRESH_TOKEN_KEY,
+    TOKEN_EXPIRES_KEY,
+    USER_KEY,
+    LEGACY_AUTH_KEY,
+    "access_token",
+    "refresh_token",
+  ]) {
+    await TokenService.deleteToken(key);
+  }
 };
 
 export const getStoredServiceUser = async (): Promise<ServiceUser | null> => {
@@ -222,6 +228,7 @@ const parseResponse = async <T>(response: Response): Promise<ApiResponse<T>> => 
 };
 
 const performSessionRefresh = async (): Promise<boolean> => {
+  const generation = sessionGeneration;
   const baseUrl = getServiceBaseUrl();
   const refreshToken = await TokenService.getToken(REFRESH_TOKEN_KEY);
   if (!baseUrl || !refreshToken) return false;
@@ -236,6 +243,7 @@ const performSessionRefresh = async (): Promise<boolean> => {
       const latestRefreshToken = await TokenService.getToken(REFRESH_TOKEN_KEY);
       return Boolean(latestRefreshToken && latestRefreshToken !== refreshToken);
     }
+    if (generation !== sessionGeneration) return false;
     await saveSession(result.data);
     return true;
   } catch {
@@ -520,12 +528,21 @@ export const fetchServiceUser = async (): Promise<ApiResponse<ServiceUser>> => {
 };
 
 export const logoutServiceAccount = async () => {
-  await serviceRequest<null>("/v1/auth/logout", {
-    method: "POST",
-    body: "{}",
-    retryAuth: false,
-  });
+  const baseUrl = getServiceBaseUrl();
+  const accessToken = await TokenService.getToken(ACCESS_TOKEN_KEY);
   await clearServiceSession();
+  resetServiceCache();
+  if (baseUrl && accessToken) {
+    void fetch(baseUrl + "/v1/auth/logout", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: "{}",
+      keepalive: true,
+    }).catch(() => undefined);
+  }
 };
 
 export const getAdminConfig = () =>

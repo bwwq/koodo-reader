@@ -27,6 +27,7 @@ jest.mock("../../assets/lib/kookit-extra-browser.min", () => ({
 const {
   bindSyncToCurrentUser,
   canUseBoundOnlineSync,
+  logoutServiceAccount,
   serviceRequest,
   normalizeServiceBaseUrl,
 } = require("./service");
@@ -152,6 +153,32 @@ describe("online service isolation", () => {
     const retryHeaders = global.fetch.mock.calls[1][1].headers;
     expect(retryHeaders.get("Authorization")).toBe(
       "Bearer new-access-from-another-tab"
+    );
+  });
+
+  it("logs out locally without waiting for an expired server session", async () => {
+    mockConfigItems.serviceBaseUrl = "https://reader.example.com";
+    mockTokens.service_access_token = "expired-access";
+    mockTokens.service_refresh_token = "expired-refresh";
+    mockTokens.service_token_expires_at = "1";
+    mockTokens.service_user = JSON.stringify({ id: "user-a", username: "alice" });
+    global.fetch.mockRejectedValueOnce(new Error("offline"));
+
+    await logoutServiceAccount();
+
+    expect(mockTokens.service_access_token).toBeUndefined();
+    expect(mockTokens.service_refresh_token).toBeUndefined();
+    expect(mockTokens.service_token_expires_at).toBeUndefined();
+    expect(mockTokens.service_user).toBeUndefined();
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://reader.example.com/v1/auth/logout",
+      expect.objectContaining({
+        method: "POST",
+        keepalive: true,
+        headers: expect.objectContaining({
+          Authorization: "Bearer expired-access",
+        }),
+      })
     );
   });
 });
