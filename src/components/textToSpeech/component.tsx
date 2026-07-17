@@ -901,7 +901,20 @@ class TextToSpeech extends React.Component<
   };
   handleVoiceLocaleList = () => {
     let voiceList = {};
-    let totalVoiceList = this.voices;
+    const totalVoiceList = (this.voices || [])
+      .map((voice) => {
+        const locale =
+          typeof voice?.locale === "string" && voice.locale.trim()
+            ? voice.locale.trim()
+            : typeof voice?.lang === "string" && voice.lang.trim()
+              ? voice.lang.trim()
+              : "";
+        return locale && locale !== voice.locale ? { ...voice, locale } : voice;
+      })
+      .filter(
+        (voice) =>
+          typeof voice?.locale === "string" && Boolean(voice.locale.trim())
+      );
     totalVoiceList.forEach((voice) => {
       if (!voiceList[voice.locale]) {
         voiceList[voice.locale] = [];
