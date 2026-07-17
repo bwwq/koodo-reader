@@ -138,7 +138,7 @@ private class SafeWrapFactory : WrapFactory() {
 
 private val safeWrapFactory = SafeWrapFactory()
 
-internal fun legadoCompatibleJavaScript(script: String): String {
+internal fun legadoCompatibleJavaScript(script: String, convertObjectShorthand: Boolean = true): String {
     var compatible = script.replace(Regex("(?m)^([ \\t]*)(?:const|let)(?=\\s)"), "$1var")
     var destructuringIndex = 0
     compatible = Regex("(?ms)^([ \\t]*)var\\s*\\{([^{}]+)}\\s*=\\s*([^;]+);").replace(compatible) { match ->
@@ -156,7 +156,16 @@ internal fun legadoCompatibleJavaScript(script: String): String {
         }
         "$indent" + "var $source = ${match.groupValues[3].trim()};\n" + declarations.joinToString("\n")
     }
-    return compatible
+    if (!convertObjectShorthand) return compatible
+    return Regex("(=\\s*\\{)([^{}]*)(})").replace(compatible) { match ->
+        val fields = match.groupValues[2].split(',').map { raw ->
+            val trimmed = raw.trim()
+            if (trimmed.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*"))) {
+                raw.replace(trimmed, "$trimmed: $trimmed")
+            } else raw
+        }
+        match.groupValues[1] + fields.joinToString(",") + match.groupValues[3]
+    }
 }
 
 private fun configureRhinoContext(context: Context, shutter: ClassShutter) {

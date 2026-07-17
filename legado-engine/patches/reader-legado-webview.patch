@@ -38,7 +38,7 @@ index d17ea37..0f7aa3d 100644
          bindings["cache"] = CacheManager(getUserNameSpace())
 -        return AppConst.SCRIPT_ENGINE.eval(jsStr, bindings)
 +        val library = (this as? BookSource)?.jsLib
-+        val compatibleLibrary = library?.let { gs.ouo.rd.koodo.legado.legadoCompatibleJavaScript(it) }
++        val compatibleLibrary = library?.let { gs.ouo.rd.koodo.legado.legadoCompatibleJavaScript(it, false) }
 +        val compatibleScript = gs.ouo.rd.koodo.legado.legadoCompatibleJavaScript(jsStr)
 +        val sourceScript = if (compatibleLibrary.isNullOrBlank()) compatibleScript else "$compatibleLibrary\n$compatibleScript"
 +        val script = "${gs.ouo.rd.koodo.legado.legadoJsCompatibilityScript}\n$sourceScript"
@@ -282,7 +282,7 @@ index 2cc200e..f41c96a 100644
          bindings["nextChapterUrl"] = nextChapterUrl
 -        return SCRIPT_ENGINE.eval(jsStr, bindings)
 +        val library = (source as? io.legado.app.data.entities.BookSource)?.jsLib
-+        val compatibleLibrary = library?.let { gs.ouo.rd.koodo.legado.legadoCompatibleJavaScript(it) }
++        val compatibleLibrary = library?.let { gs.ouo.rd.koodo.legado.legadoCompatibleJavaScript(it, false) }
 +        val compatibleScript = gs.ouo.rd.koodo.legado.legadoCompatibleJavaScript(jsStr)
 +        val sourceScript = if (compatibleLibrary.isNullOrBlank()) compatibleScript else "$compatibleLibrary\n$compatibleScript"
 +        val script = "${gs.ouo.rd.koodo.legado.legadoJsCompatibilityScript}\n$sourceScript"
@@ -366,7 +366,7 @@ index 77b8231..4fc3419 100644
          bindings["result"] = result
 -        return SCRIPT_ENGINE.eval(jsStr, bindings)
 +        val library = (source as? io.legado.app.data.entities.BookSource)?.jsLib
-+        val compatibleLibrary = library?.let { gs.ouo.rd.koodo.legado.legadoCompatibleJavaScript(it) }
++        val compatibleLibrary = library?.let { gs.ouo.rd.koodo.legado.legadoCompatibleJavaScript(it, false) }
 +        val compatibleScript = gs.ouo.rd.koodo.legado.legadoCompatibleJavaScript(jsStr)
 +        val sourceScript = if (compatibleLibrary.isNullOrBlank()) compatibleScript else "$compatibleLibrary\n$compatibleScript"
 +        val script = "${gs.ouo.rd.koodo.legado.legadoJsCompatibilityScript}\n$sourceScript"
