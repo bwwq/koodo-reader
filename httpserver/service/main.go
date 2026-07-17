@@ -127,11 +127,12 @@ func serviceCapabilities() []string {
 }
 
 func legadoEngineHealthy() bool {
-	client := http.Client{Timeout: time.Second}
+	client := http.Client{Timeout: 3 * time.Second}
 	response, err := client.Get(legadoEngineURL() + "/health")
 	if err != nil {
 		return false
 	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1024))
 	response.Body.Close()
 	return response.StatusCode == http.StatusOK
 }
