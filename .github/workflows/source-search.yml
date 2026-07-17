@@ -40,9 +40,15 @@ jobs:
         env:
           LEGADO_ALLOWED_PRIVATE_HOSTS: 127.0.0.1
         run: |
-          if ! gradle --no-daemon test shadowJar; then
+          set +e
+          gradle --no-daemon test shadowJar 2>&1 | tee /tmp/legado-gradle.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
             find build/test-results/test -type f -name '*.xml' -maxdepth 2 -print -exec cat {} \; || true
-            exit 1
+            detail=$(tail -n 60 /tmp/legado-gradle.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+            echo "::error title=Legado engine build failed::$detail"
+            exit "$status"
           fi
       - name: Build hardened engine image
         run: docker build -f legado-engine/Dockerfile -t koodo-legado-engine:test .
