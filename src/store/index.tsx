@@ -14,6 +14,7 @@ import HtmlBookModel from "../models/HtmlBook";
 import PluginModel from "../models/Plugin";
 import { ServiceUser } from "../utils/request/service";
 import { HighlightValue } from "../utils/common";
+import { ImportBookFunction } from "../utils/request/bookSources";
 const rootReducer = combineReducers({
   book,
   manager,
@@ -69,7 +70,7 @@ export type stateType = {
     isReading: boolean;
     currentBook: BookModel;
     renderBookFunc: () => void;
-    importBookFunc: (file: any) => Promise<void>;
+    importBookFunc: ImportBookFunction;
     cloudSyncFunc: () => Promise<void>;
     renderNoteFunc: () => void;
   };

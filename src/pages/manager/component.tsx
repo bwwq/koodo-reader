@@ -30,9 +30,30 @@ import {
 } from "../../utils/reader/bookDrag";
 import Footer from "../../components/footer";
 import ProtectionOverlay from "../../components/protection";
+import DatabaseService from "../../utils/storage/databaseService";
+import {
+  checkBookSubscription,
+  createBookSubscriptionImport,
+  downloadBookImport,
+  getTrackedSourceBooks,
+  listBookSubscriptions,
+  untrackSourceBook,
+  watchBookImport,
+} from "../../utils/request/bookSources";
+
+const sourceUpdateStageLabels: Record<string, string> = {
+  queued: "等待处理",
+  preparing: "准备更新",
+  book_info: "解析详情",
+  chapters: "下载章节",
+  packaging: "生成 EPUB",
+  ready: "准备替换",
+};
+
 class Manager extends React.Component<ManagerProps, ManagerState> {
   timer!: NodeJS.Timeout;
   private isDraggingFromApp = false;
+  private sourceRefreshStarted = false;
   constructor(props: ManagerProps) {
     super(props);
     this.state = {
@@ -98,7 +119,83 @@ class Manager extends React.Component<ManagerProps, ManagerState> {
         this.props.history.push("/manager/shelf");
       }
     }
+    void this.refreshSourceBooks();
   }
+
+  refreshSourceBooks = async () => {
+    if (this.sourceRefreshStarted) return;
+    this.sourceRefreshStarted = true;
+    const tracked = getTrackedSourceBooks();
+    if (!Object.keys(tracked).length) return;
+
+    const subscriptions = await listBookSubscriptions();
+    if (subscriptions.code !== 200 || !subscriptions.data) return;
+    let updated = 0;
+    let failed = 0;
+    const toastId = "source-books-refresh";
+
+    for (const subscription of subscriptions.data) {
+      const bookKey = tracked[subscription.id];
+      if (!bookKey) continue;
+      const book = await DatabaseService.getRecord(bookKey, "books");
+      if (!book) {
+        untrackSourceBook(subscription.id);
+        continue;
+      }
+
+      toast.loading(`检查更新：${subscription.title}`, { id: toastId });
+      const checked = await checkBookSubscription(subscription.id);
+      if (checked.code !== 200 || !checked.data) {
+        failed++;
+        continue;
+      }
+      if (!checked.data.update_available) continue;
+
+      const created = await createBookSubscriptionImport(subscription.id);
+      if ((created.code !== 202 && created.code !== 200) || !created.data) {
+        failed++;
+        continue;
+      }
+      let finalJob = created.data;
+      const watched = await watchBookImport(created.data.id, (job) => {
+        finalJob = job;
+        const progress = job.total
+          ? ` ${job.current}/${job.total}`
+          : "";
+        const stage = sourceUpdateStageLabels[job.stage] || "正在处理";
+        toast.loading(`更新《${subscription.title}》：${stage}${progress}`, {
+          id: toastId,
+        });
+      });
+      if (watched.code !== 200 || finalJob.status !== "ready") {
+        failed++;
+        continue;
+      }
+      try {
+        const file = await downloadBookImport(finalJob.id);
+        await this.props.importBookFunc(file, {
+          replaceBookKey: bookKey,
+          sourceSubscriptionId: subscription.id,
+          silent: true,
+        });
+        updated++;
+      } catch (error) {
+        console.error("source book update failed", error);
+        failed++;
+      }
+    }
+
+    if (failed) {
+      toast.error(`书源更新完成：更新 ${updated} 本，失败 ${failed} 本`, {
+        id: toastId,
+        duration: 5000,
+      });
+    } else if (updated) {
+      toast.success(`已更新 ${updated} 本书`, { id: toastId });
+    } else {
+      toast.dismiss(toastId);
+    }
+  };
   componentWillUnmount() {
     document.removeEventListener(
       "dragstart",

@@ -4,6 +4,7 @@ import { ConfigService } from "../../../assets/lib/kookit-extra-browser.min";
 import {
   BookImportJob,
   BookSourceItem,
+  ImportBookFunction,
   SourceSearchEvent,
   SourceSearchResult,
   cancelBookImport,
@@ -25,7 +26,7 @@ interface Props {
   handleSourceSearchDialog: (open: boolean) => void;
   handleSetting: (open: boolean) => void;
   handleSettingMode: (mode: string) => void;
-  importBookFunc: (file: File) => Promise<void>;
+  importBookFunc: ImportBookFunction;
   t: (key: string) => string;
 }
 
@@ -179,7 +180,9 @@ function SourceSearchDialog(props: Props) {
       return null;
     });
     if (!file) return;
-    await props.importBookFunc(file);
+    await props.importBookFunc(file, {
+      sourceSubscriptionId: finalJob.subscription_id,
+    });
     toast.success("图书已导入书架");
     setJob(null);
   };

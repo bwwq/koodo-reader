@@ -26,6 +26,10 @@ import {
 } from "../../utils/common";
 import DatabaseService from "../../utils/storage/databaseService";
 import { BookHelper } from "../../assets/lib/kookit.min";
+import {
+  BookImportOptions,
+  trackSourceBook,
+} from "../../utils/request/bookSources";
 
 // Convert supportedFormats to react-dropzone v14+ accept format
 // Key is MIME type, value is array of file extensions
@@ -210,7 +214,10 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
     });
   };
 
-  getMd5WithBrowser = async (file: any) => {
+  getMd5WithBrowser = async (
+    file: any,
+    options: BookImportOptions = {}
+  ) => {
     return new Promise<void>(async (resolve) => {
       const md5 = await calculateFileMD5(file);
       if (!md5) {
@@ -221,7 +228,7 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
         return resolve();
       } else {
         try {
-          await this.handleBook(file, md5);
+          await this.handleBook(file, md5, options);
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
@@ -234,7 +241,11 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
     });
   };
 
-  handleBook = (file: any, md5: string) => {
+  handleBook = (
+    file: any,
+    md5: string,
+    options: BookImportOptions = {}
+  ) => {
     let extension = (file.name as string)
       .split(".")
       .reverse()[0]
@@ -243,7 +254,9 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
     let result: BookModel;
     return new Promise<void>(async (resolve) => {
       let isRepeat = false;
-      let repeatBook: BookModel | null = await BookUtil.getBookByMd5(md5);
+      let repeatBook: BookModel | null = options.replaceBookKey
+        ? null
+        : await BookUtil.getBookByMd5(md5);
       if (repeatBook) {
         isRepeat = true;
         if (this.props.books && this.props.books.length > 0) {
@@ -343,10 +356,44 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
               });
               return resolve();
             }
+            if (options.replaceBookKey) {
+              const previous = await DatabaseService.getRecord(
+                options.replaceBookKey,
+                "books"
+              );
+              if (!previous) {
+                toast.error("原书籍已不存在，已停止自动更新");
+                return resolve();
+              }
+              result.key = previous.key;
+              result.name = previous.name || result.name;
+              result.author = previous.author || result.author;
+              result.path = "";
+              await BookUtil.deleteBook("cache-" + result.key, "zip");
+              await BookUtil.addBook(
+                result.key,
+                result.format.toLowerCase(),
+                file_content as ArrayBuffer
+              );
+              await CoverUtil.addCover(result as BookModel);
+              await DatabaseService.saveRecord(result, "books");
+              if (options.sourceSubscriptionId) {
+                trackSourceBook(options.sourceSubscriptionId, result.key);
+              }
+              this.props.handleFetchBooks();
+              toast.success("书源更新完成：" + result.name.substring(0, 50), {
+                id: "source-book-update",
+              });
+              return resolve();
+            }
+
             await this.handleAddBook(
               result as BookModel,
               file_content as ArrayBuffer
             );
+            if (options.sourceSubscriptionId) {
+              trackSourceBook(options.sourceSubscriptionId, result.key);
+            }
 
             return resolve();
           };

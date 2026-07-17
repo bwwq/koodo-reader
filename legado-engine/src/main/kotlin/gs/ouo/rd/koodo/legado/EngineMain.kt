@@ -51,6 +51,8 @@ private class EngineJob(val id: String) {
     @Volatile var total = 0
     @Volatile var error = ""
     @Volatile var file = ""
+    @Volatile var latestChapter = ""
+    @Volatile var latestChapterUrl = ""
     val createdAt = Instant.now().epochSecond
 
     fun response(): Map<String, Any> = mapOf(
@@ -59,6 +61,8 @@ private class EngineJob(val id: String) {
         "stage" to stage,
         "current" to current,
         "total" to total,
+        "latest_chapter" to latestChapter,
+        "latest_chapter_url" to latestChapterUrl,
         "error" to error,
         "ready" to (status == "ready")
     )
@@ -149,6 +153,12 @@ private data class ImportRequest(
     val namespace: String = "default"
 )
 
+private data class CheckRequest(
+    val source: JsonObject,
+    val book: JsonObject,
+    val namespace: String = "default"
+)
+
 private fun handleSearch(exchange: HttpExchange) {
     if (exchange.requestMethod != "POST") return exchange.problem(405, "method not allowed")
     val request = gson.fromJson(exchange.readBody(), SearchRequest::class.java)
@@ -161,6 +171,32 @@ private fun handleSearch(exchange: HttpExchange) {
         }
     }
     exchange.json(200, mapOf("items" to result))
+}
+
+private fun handleCheck(exchange: HttpExchange) {
+    if (exchange.requestMethod != "POST") return exchange.problem(405, "method not allowed")
+    val request = gson.fromJson(exchange.readBody(), CheckRequest::class.java)
+    val source = validateSource(gson.toJson(request.source))
+    val search = gson.fromJson(request.book, SearchBook::class.java)
+    search.setUserNameSpace(request.namespace)
+    val webBook = WebBook(source, debugLog = false, userNameSpace = request.namespace)
+    val book = runBlocking {
+        withTimeout(30_000) {
+            val candidate = search.toBook()
+            if (candidate.tocUrl.isBlank() || candidate.intro.isNullOrBlank()) {
+                webBook.getBookInfo(candidate)
+            } else candidate
+        }
+    }
+    val chapters = runBlocking { withTimeout(120_000) { webBook.getChapterList(book) } }
+    if (chapters.isEmpty()) throw IllegalStateException("chapter list is empty")
+    if (chapters.size > maxChapters) throw IllegalStateException("too many chapters")
+    val latest = chapters.last()
+    exchange.json(200, mapOf(
+        "chapter_count" to chapters.size,
+        "latest_chapter" to latest.title,
+        "latest_chapter_url" to latest.url
+    ))
 }
 
 private fun handleImports(exchange: HttpExchange) {
@@ -229,6 +265,8 @@ private fun buildBook(job: EngineJob, source: BookSource, search: SearchBook, na
         if (chapters.isEmpty()) throw IllegalStateException("chapter list is empty")
         if (chapters.size > maxChapters) throw IllegalStateException("too many chapters")
         job.total = chapters.size
+        job.latestChapter = chapters.last().title
+        job.latestChapterUrl = chapters.last().url
         val contents = ArrayList<Pair<String, String>>(chapters.size)
         chapters.forEachIndexed { index, chapter ->
             if (Thread.currentThread().isInterrupted) throw InterruptedException("cancelled")
@@ -408,6 +446,13 @@ fun main() {
             if (!exchange.authorized()) exchange.problem(401, "unauthorized") else handleSearch(exchange)
         } catch (error: Throwable) {
             exchange.problem(422, error.message ?: "search failed")
+        }
+    }
+    server.createContext("/internal/check") { exchange ->
+        try {
+            if (!exchange.authorized()) exchange.problem(401, "unauthorized") else handleCheck(exchange)
+        } catch (error: Throwable) {
+            exchange.problem(422, error.message ?: "check failed")
         }
     }
     server.createContext("/internal/imports") { exchange ->

@@ -61,16 +61,28 @@ type cachedSearchResult struct {
 }
 
 type importJob struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	Stage     string `json:"stage"`
-	Current   int    `json:"current"`
-	Total     int    `json:"total"`
-	Error     string `json:"error,omitempty"`
-	Ready     bool   `json:"ready"`
-	FileName  string `json:"file_name,omitempty"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
+	ID             string `json:"id"`
+	Status         string `json:"status"`
+	Stage          string `json:"stage"`
+	Current        int    `json:"current"`
+	Total          int    `json:"total"`
+	Error          string `json:"error,omitempty"`
+	Ready          bool   `json:"ready"`
+	FileName       string `json:"file_name,omitempty"`
+	SubscriptionID string `json:"subscription_id,omitempty"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
+}
+
+type bookSubscription struct {
+	ID               string `json:"id"`
+	SourceID         string `json:"source_id"`
+	SourceName       string `json:"source_name"`
+	Title            string `json:"title"`
+	LastChapterCount int    `json:"last_chapter_count"`
+	LastChapter      string `json:"last_chapter,omitempty"`
+	CheckedAt        int64  `json:"checked_at,omitempty"`
+	UpdatedAt        int64  `json:"updated_at"`
 }
 
 var (
@@ -119,6 +131,26 @@ func initBookSourceSchema() []string {
 			expires_at INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_book_import_jobs_user ON book_import_jobs(user_id,updated_at)`,
+		`CREATE TABLE IF NOT EXISTS book_source_subscriptions (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			source_id TEXT NOT NULL,
+			book_fingerprint TEXT NOT NULL,
+			title TEXT NOT NULL,
+			raw_result TEXT NOT NULL,
+			last_chapter_count INTEGER NOT NULL DEFAULT 0,
+			last_chapter_key TEXT NOT NULL DEFAULT '',
+			last_chapter_title TEXT NOT NULL DEFAULT '',
+			checked_at INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			UNIQUE(user_id,source_id,book_fingerprint)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_book_source_subscriptions_user ON book_source_subscriptions(user_id,updated_at)`,
+		`CREATE TABLE IF NOT EXISTS book_import_subscriptions (
+			job_id TEXT PRIMARY KEY REFERENCES book_import_jobs(id) ON DELETE CASCADE,
+			subscription_id TEXT NOT NULL REFERENCES book_source_subscriptions(id) ON DELETE CASCADE
+		)`,
 	}
 }
 
@@ -132,6 +164,10 @@ func handleBookSourceRoutes(w http.ResponseWriter, r *http.Request) bool {
 		handleSearchBookSources(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/book-sources/"):
 		handleBookSourceItem(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/book-subscriptions":
+		handleListBookSubscriptions(w, r)
+	case strings.HasPrefix(r.URL.Path, "/v1/book-subscriptions/"):
+		handleBookSubscriptionItem(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/book-imports":
 		handleCreateBookImport(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/book-imports/"):
@@ -699,6 +735,124 @@ func convertOPDS2Publications(userID string, source bookSource, publications []o
 	return items
 }
 
+func handleListBookSubscriptions(w http.ResponseWriter, r *http.Request) {
+	auth := requireAuth(w, r)
+	if auth == nil {
+		return
+	}
+	rows, err := db.Query(`SELECT s.id,s.source_id,COALESCE(b.name,''),s.title,s.last_chapter_count,s.last_chapter_title,s.checked_at,s.updated_at FROM book_source_subscriptions s LEFT JOIN book_sources b ON b.id=s.source_id AND b.user_id=s.user_id WHERE s.user_id=? ORDER BY s.updated_at DESC`, auth.User.ID)
+	if err != nil {
+		writeAPI(w, 500, 500, "读取追更列表失败", nil)
+		return
+	}
+	defer rows.Close()
+	items := []bookSubscription{}
+	for rows.Next() {
+		var item bookSubscription
+		if rows.Scan(&item.ID, &item.SourceID, &item.SourceName, &item.Title, &item.LastChapterCount, &item.LastChapter, &item.CheckedAt, &item.UpdatedAt) == nil {
+			items = append(items, item)
+		}
+	}
+	writeAPI(w, 200, 200, "success", items)
+}
+
+func handleBookSubscriptionItem(w http.ResponseWriter, r *http.Request) {
+	auth := requireAuth(w, r)
+	if auth == nil {
+		return
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/book-subscriptions/"), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeAPI(w, 404, 404, "追更任务不存在", nil)
+		return
+	}
+	id := parts[0]
+	if len(parts) == 1 && r.Method == http.MethodDelete {
+		result, _ := db.Exec(`DELETE FROM book_source_subscriptions WHERE id=? AND user_id=?`, id, auth.User.ID)
+		if count, _ := result.RowsAffected(); count == 0 {
+			writeAPI(w, 404, 404, "追更任务不存在", nil)
+			return
+		}
+		writeAPI(w, 200, 200, "已停止追更", nil)
+		return
+	}
+	if len(parts) != 2 || r.Method != http.MethodPost {
+		writeAPI(w, 405, 405, "请求方法不支持", nil)
+		return
+	}
+	switch parts[1] {
+	case "check":
+		checkBookSubscription(w, r, auth.User.ID, id)
+	case "import":
+		importBookSubscription(w, auth.User.ID, id)
+	default:
+		writeAPI(w, 404, 404, "追更任务不存在", nil)
+	}
+}
+
+func checkBookSubscription(w http.ResponseWriter, r *http.Request, userID, id string) {
+	var definition, raw, title, sourceName, sourceID string
+	var previousCount int
+	var previousKey string
+	err := db.QueryRow(`SELECT s.source_id,s.title,s.raw_result,s.last_chapter_count,s.last_chapter_key,b.name,b.definition FROM book_source_subscriptions s JOIN book_sources b ON b.id=s.source_id AND b.user_id=s.user_id WHERE s.id=? AND s.user_id=? AND b.enabled=1`, id, userID).Scan(&sourceID, &title, &raw, &previousCount, &previousKey, &sourceName, &definition)
+	if err != nil {
+		writeAPI(w, 404, 404, "书源已停用或不存在", nil)
+		return
+	}
+	payload, _ := json.Marshal(map[string]any{"source": json.RawMessage(definition), "book": json.RawMessage(raw), "namespace": userID})
+	ctx, cancel := context.WithTimeout(r.Context(), 155*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, legadoEngineURL()+"/internal/check", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Engine-Token", os.Getenv("LEGADO_ENGINE_TOKEN"))
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeAPI(w, 502, 502, "检查更新失败: "+err.Error(), nil)
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		writeAPI(w, 502, 502, "检查更新失败: "+strings.TrimSpace(string(message)), nil)
+		return
+	}
+	var checked struct {
+		ChapterCount int    `json:"chapter_count"`
+		Latest       string `json:"latest_chapter"`
+		LatestURL    string `json:"latest_chapter_url"`
+	}
+	if json.NewDecoder(response.Body).Decode(&checked) != nil || checked.ChapterCount <= 0 {
+		writeAPI(w, 502, 502, "规则引擎返回了无效目录", nil)
+		return
+	}
+	now := time.Now().Unix()
+	currentKey := firstNonEmpty(checked.LatestURL, checked.Latest)
+	updateAvailable := previousCount > 0 && (checked.ChapterCount > previousCount || (checked.ChapterCount == previousCount && previousKey != "" && currentKey != "" && currentKey != previousKey))
+	if previousCount == 0 {
+		_, _ = db.Exec(`UPDATE book_source_subscriptions SET last_chapter_count=?,last_chapter_key=?,last_chapter_title=?,checked_at=?,updated_at=? WHERE id=? AND user_id=?`, checked.ChapterCount, currentKey, checked.Latest, now, now, id, userID)
+	} else {
+		_, _ = db.Exec(`UPDATE book_source_subscriptions SET checked_at=? WHERE id=? AND user_id=?`, now, id, userID)
+	}
+	writeAPI(w, 200, 200, "检查完成", map[string]any{"id": id, "title": title, "source_name": sourceName, "source_id": sourceID, "update_available": updateAvailable, "previous_count": previousCount, "chapter_count": checked.ChapterCount, "latest_chapter": checked.Latest})
+}
+
+func importBookSubscription(w http.ResponseWriter, userID, id string) {
+	var result cachedSearchResult
+	var raw string
+	err := db.QueryRow(`SELECT s.source_id,b.name,s.title,s.raw_result FROM book_source_subscriptions s JOIN book_sources b ON b.id=s.source_id AND b.user_id=s.user_id WHERE s.id=? AND s.user_id=? AND b.enabled=1`, id, userID).Scan(&result.SourceID, &result.SourceName, &result.Title, &raw)
+	if err != nil {
+		writeAPI(w, 404, 404, "书源已停用或不存在", nil)
+		return
+	}
+	result.UserID, result.SourceType, result.Raw = userID, "legado", json.RawMessage(raw)
+	job, status, err := startImportJob(userID, result, id)
+	if err != nil {
+		writeAPI(w, status, status, err.Error(), nil)
+		return
+	}
+	writeAPI(w, 202, 202, "更新任务已加入队列", job)
+}
+
 func handleCreateBookImport(w http.ResponseWriter, r *http.Request) {
 	auth := requireAuth(w, r)
 	if auth == nil {
@@ -715,25 +869,66 @@ func handleCreateBookImport(w http.ResponseWriter, r *http.Request) {
 		writeAPI(w, 404, 404, "搜索结果已失效，请重新搜索", nil)
 		return
 	}
-	var running int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM book_import_jobs WHERE user_id=? AND status IN ('queued','running')`, auth.User.ID).Scan(&running)
-	if running >= 1 {
-		writeAPI(w, 429, 429, "每个账号同时只能生成一本书", nil)
+	subscriptionID := ""
+	if result.SourceType == "legado" {
+		var err error
+		subscriptionID, err = ensureBookSubscription(auth.User.ID, result)
+		if err != nil {
+			writeAPI(w, 500, 500, "保存追更信息失败", nil)
+			return
+		}
+	}
+	job, status, err := startImportJob(auth.User.ID, result, subscriptionID)
+	if err != nil {
+		writeAPI(w, status, status, err.Error(), nil)
 		return
+	}
+	writeAPI(w, 202, 202, "任务已创建", job)
+}
+
+func startImportJob(userID string, result cachedSearchResult, subscriptionID string) (importJob, int, error) {
+	var running int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM book_import_jobs WHERE user_id=? AND status IN ('queued','running')`, userID).Scan(&running)
+	if running >= 1 {
+		return importJob{}, 429, errors.New("每个账号同时只能生成一本书")
 	}
 	id := randomString(20)
 	now := time.Now().Unix()
-	_, err := db.Exec(`INSERT INTO book_import_jobs(id,user_id,source_id,source_type,status,stage,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)`, id, auth.User.ID, result.SourceID, result.SourceType, "queued", "queued", now, now, time.Now().Add(generatedFileTTL).Unix())
+	tx, err := db.Begin()
 	if err != nil {
-		writeAPI(w, 500, 500, "创建导入任务失败", nil)
-		return
+		return importJob{}, 500, errors.New("创建导入任务失败")
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`INSERT INTO book_import_jobs(id,user_id,source_id,source_type,status,stage,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)`, id, userID, result.SourceID, result.SourceType, "queued", "queued", now, now, time.Now().Add(generatedFileTTL).Unix())
+	if err == nil && subscriptionID != "" {
+		_, err = tx.Exec(`INSERT INTO book_import_subscriptions(job_id,subscription_id) VALUES(?,?)`, id, subscriptionID)
+	}
+	if err != nil || tx.Commit() != nil {
+		return importJob{}, 500, errors.New("创建导入任务失败")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	jobMu.Lock()
 	activeJobs[id] = cancel
 	jobMu.Unlock()
-	go runImportJob(ctx, id, auth.User.ID, result)
-	writeAPI(w, 202, 202, "任务已创建", importJob{ID: id, Status: "queued", Stage: "queued", CreatedAt: now, UpdatedAt: now})
+	go runImportJob(ctx, id, userID, result)
+	return importJob{ID: id, Status: "queued", Stage: "queued", SubscriptionID: subscriptionID, CreatedAt: now, UpdatedAt: now}, 202, nil
+}
+
+func ensureBookSubscription(userID string, result cachedSearchResult) (string, error) {
+	var fields map[string]any
+	_ = json.Unmarshal(result.Raw, &fields)
+	bookRef := firstNonEmpty(anyString(fields["bookUrl"]), anyString(fields["tocUrl"]), result.Title+"\n"+strings.Join(result.Authors, "\n"))
+	fingerprint := tokenHash(result.SourceID + "\n" + bookRef)
+	var id string
+	err := db.QueryRow(`SELECT id FROM book_source_subscriptions WHERE user_id=? AND source_id=? AND book_fingerprint=?`, userID, result.SourceID, fingerprint).Scan(&id)
+	now := time.Now().Unix()
+	if err == nil {
+		_, err = db.Exec(`UPDATE book_source_subscriptions SET title=?,raw_result=?,updated_at=? WHERE id=? AND user_id=?`, result.Title, string(result.Raw), now, id, userID)
+		return id, err
+	}
+	id = randomString(20)
+	_, err = db.Exec(`INSERT INTO book_source_subscriptions(id,user_id,source_id,book_fingerprint,title,raw_result,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, id, userID, result.SourceID, fingerprint, result.Title, string(result.Raw), now, now)
+	return id, err
 }
 
 func runImportJob(ctx context.Context, id, userID string, result cachedSearchResult) {
@@ -847,7 +1042,7 @@ func readImportJob(userID, id string, refresh bool) (importJob, error) {
 	var job importJob
 	var sourceType, engineID, filePath string
 	var ready int
-	err := db.QueryRow(`SELECT id,status,stage,current,total,error,file_name,file_path,source_type,engine_job_id,created_at,updated_at FROM book_import_jobs WHERE id=? AND user_id=?`, id, userID).Scan(&job.ID, &job.Status, &job.Stage, &job.Current, &job.Total, &job.Error, &job.FileName, &filePath, &sourceType, &engineID, &job.CreatedAt, &job.UpdatedAt)
+	err := db.QueryRow(`SELECT j.id,j.status,j.stage,j.current,j.total,j.error,j.file_name,j.file_path,j.source_type,j.engine_job_id,j.created_at,j.updated_at,COALESCE(s.subscription_id,'') FROM book_import_jobs j LEFT JOIN book_import_subscriptions s ON s.job_id=j.id WHERE j.id=? AND j.user_id=?`, id, userID).Scan(&job.ID, &job.Status, &job.Stage, &job.Current, &job.Total, &job.Error, &job.FileName, &filePath, &sourceType, &engineID, &job.CreatedAt, &job.UpdatedAt, &job.SubscriptionID)
 	if err != nil {
 		return job, err
 	}
@@ -860,6 +1055,11 @@ func readImportJob(userID, id string, refresh bool) (importJob, error) {
 			job.Error = anyString(remote["error"])
 			job.UpdatedAt = time.Now().Unix()
 			_, _ = db.Exec(`UPDATE book_import_jobs SET status=?,stage=?,current=?,total=?,error=?,updated_at=? WHERE id=? AND user_id=?`, job.Status, job.Stage, job.Current, job.Total, job.Error, job.UpdatedAt, id, userID)
+			if job.Status == "ready" && job.SubscriptionID != "" {
+				latestTitle := anyString(remote["latest_chapter"])
+				latestKey := firstNonEmpty(anyString(remote["latest_chapter_url"]), latestTitle)
+				_, _ = db.Exec(`UPDATE book_source_subscriptions SET last_chapter_count=?,last_chapter_key=?,last_chapter_title=?,checked_at=?,updated_at=? WHERE id=? AND user_id=?`, job.Total, latestKey, latestTitle, job.UpdatedAt, job.UpdatedAt, job.SubscriptionID, userID)
+			}
 		} else {
 			job.Status, job.Stage, job.Error, job.UpdatedAt = "failed", "failed", "规则引擎已重启，请重新创建导入任务", time.Now().Unix()
 			_, _ = db.Exec(`UPDATE book_import_jobs SET status=?,stage=?,error=?,updated_at=? WHERE id=? AND user_id=?`, job.Status, job.Stage, job.Error, job.UpdatedAt, id, userID)

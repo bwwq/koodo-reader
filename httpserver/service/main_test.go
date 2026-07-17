@@ -527,6 +527,61 @@ func TestSearchResultCacheIsAccountBound(t *testing.T) {
 	}
 }
 
+func TestBookSubscriptionsAreStableAndAccountBound(t *testing.T) {
+	openTestDatabase(t)
+	if res := registerAccount(t, "tracking-admin", "password-123", ""); res.Code != http.StatusOK {
+		t.Fatalf("bootstrap admin: %d %s", res.Code, res.Body.String())
+	}
+	admin := loginAccount(t, "tracking-admin", "password-123")
+	created := request(t, http.MethodPost, "/v1/admin/users", map[string]string{
+		"username": "tracking-user", "password": "password-456",
+	}, bearer(admin["access_token"].(string)))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create tracking user: %d %s", created.Code, created.Body.String())
+	}
+	user := loginAccount(t, "tracking-user", "password-456")
+
+	for _, token := range []string{admin["access_token"].(string), user["access_token"].(string)} {
+		res := request(t, http.MethodPost, "/v1/book-sources/import", map[string]any{
+			"bookSourceUrl": "https://tracking.example", "bookSourceName": "Tracking source",
+			"searchUrl": "/search?q={{key}}",
+		}, bearer(token))
+		if res.Code != http.StatusOK {
+			t.Fatalf("import tracking source: %d %s", res.Code, res.Body.String())
+		}
+	}
+
+	var adminID, userID, adminSourceID, userSourceID string
+	_ = db.QueryRow(`SELECT id FROM users WHERE username='tracking-admin'`).Scan(&adminID)
+	_ = db.QueryRow(`SELECT id FROM users WHERE username='tracking-user'`).Scan(&userID)
+	_ = db.QueryRow(`SELECT id FROM book_sources WHERE user_id=?`, adminID).Scan(&adminSourceID)
+	_ = db.QueryRow(`SELECT id FROM book_sources WHERE user_id=?`, userID).Scan(&userSourceID)
+	adminResult := cachedSearchResult{SourceID: adminSourceID, SourceType: "legado", Title: "Tracked book", Raw: json.RawMessage(`{"name":"Tracked book","bookUrl":"https://tracking.example/book/1"}`)}
+	adminSubscription, err := ensureBookSubscription(adminID, adminResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ensureBookSubscription(adminID, adminResult)
+	if err != nil || second != adminSubscription {
+		t.Fatalf("same book created duplicate subscriptions: %q %q %v", adminSubscription, second, err)
+	}
+	userResult := adminResult
+	userResult.SourceID = userSourceID
+	userSubscription, err := ensureBookSubscription(userID, userResult)
+	if err != nil || userSubscription == adminSubscription {
+		t.Fatalf("subscriptions were not account isolated: %q %q %v", adminSubscription, userSubscription, err)
+	}
+
+	adminList := request(t, http.MethodGet, "/v1/book-subscriptions", nil, bearer(admin["access_token"].(string)))
+	userList := request(t, http.MethodGet, "/v1/book-subscriptions", nil, bearer(user["access_token"].(string)))
+	if !strings.Contains(adminList.Body.String(), adminSubscription) || strings.Contains(adminList.Body.String(), userSubscription) {
+		t.Fatalf("admin subscription isolation failed: %s", adminList.Body.String())
+	}
+	if !strings.Contains(userList.Body.String(), userSubscription) || strings.Contains(userList.Body.String(), adminSubscription) {
+		t.Fatalf("user subscription isolation failed: %s", userList.Body.String())
+	}
+}
+
 func TestOPDS2ResultsUseRealOpenAccessAcquisition(t *testing.T) {
 	var feed opds2Feed
 	err := json.Unmarshal([]byte(`{

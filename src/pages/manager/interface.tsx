@@ -1,5 +1,6 @@
 import BookModel from "../../models/Book";
 import { RouteComponentProps } from "react-router";
+import { ImportBookFunction } from "../../utils/request/bookSources";
 export interface ManagerProps extends RouteComponentProps<any> {
   books: BookModel[];
   mode: string;
@@ -20,7 +21,7 @@ export interface ManagerProps extends RouteComponentProps<any> {
   isOpenLocalFileDialog: boolean;
   isOpenOPDSDialog: boolean;
   isOpenSourceSearchDialog: boolean;
-  importBookFunc: (file: any) => Promise<void>;
+  importBookFunc: ImportBookFunction;
   handleFetchBooks: () => void;
   handleFetchPlugins: () => void;
   handleFetchNotes: () => void;

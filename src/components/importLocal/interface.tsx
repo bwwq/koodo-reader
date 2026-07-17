@@ -1,5 +1,6 @@
 import BookModel from "../../models/Book";
 import { RouteComponentProps } from "react-router";
+import { ImportBookFunction } from "../../utils/request/bookSources";
 export interface ImportLocalProps extends RouteComponentProps<any> {
   books: BookModel[];
   deletedBooks: BookModel[];
@@ -14,7 +15,7 @@ export interface ImportLocalProps extends RouteComponentProps<any> {
   handleImportDialog: (isOpenImportDialog: boolean) => void;
   handleOPDSDialog: (isOpen: boolean) => void;
   handleSourceSearchDialog: (isOpen: boolean) => void;
-  handleImportBookFunc: (importBookFunc: (file: any) => Promise<void>) => void;
+  handleImportBookFunc: (importBookFunc: ImportBookFunction) => void;
   handleReadingBook: (book: BookModel) => void;
   t: (title: string) => string;
 }

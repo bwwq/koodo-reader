@@ -1,4 +1,5 @@
 import BookModel from "../../models/Book";
+import { ImportBookFunction } from "../../utils/request/bookSources";
 export function handleEditDialog(mode: boolean) {
   return { type: "HANDLE_EDIT_DIALOG", payload: mode };
 }
@@ -11,7 +12,7 @@ export function handleAddDialog(mode: boolean) {
 export function handleRenderBookFunc(renderBookFunc: () => void) {
   return { type: "HANDLE_RENDER_BOOK_FUNC", payload: renderBookFunc };
 }
-export function handleImportBookFunc(importBookFunc: () => void) {
+export function handleImportBookFunc(importBookFunc: ImportBookFunction) {
   return { type: "HANDLE_IMPORT_BOOK_FUNC", payload: importBookFunc };
 }
 export function handleCloudSyncFunc(cloudSyncFunc: () => void) {

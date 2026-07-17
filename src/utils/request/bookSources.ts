@@ -46,7 +46,62 @@ export interface BookImportJob {
   error?: string;
   ready: boolean;
   file_name?: string;
+  subscription_id?: string;
 }
+
+export interface BookImportOptions {
+  sourceSubscriptionId?: string;
+  replaceBookKey?: string;
+  silent?: boolean;
+}
+
+export type ImportBookFunction = (
+  file: File,
+  options?: BookImportOptions
+) => Promise<void>;
+
+export interface BookSubscription {
+  id: string;
+  source_id: string;
+  source_name: string;
+  title: string;
+  last_chapter_count: number;
+  last_chapter?: string;
+}
+
+export interface BookSubscriptionCheck {
+  id: string;
+  title: string;
+  source_name: string;
+  update_available: boolean;
+  previous_count: number;
+  chapter_count: number;
+  latest_chapter?: string;
+}
+
+const TRACKED_BOOKS_KEY = "source-book-subscriptions-v1";
+
+export const getTrackedSourceBooks = (): Record<string, string> => {
+  try {
+    const value = JSON.parse(localStorage.getItem(TRACKED_BOOKS_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+};
+
+export const trackSourceBook = (subscriptionId: string, bookKey: string) => {
+  if (!subscriptionId || !bookKey) return;
+  const tracked = getTrackedSourceBooks();
+  tracked[subscriptionId] = bookKey;
+  localStorage.setItem(TRACKED_BOOKS_KEY, JSON.stringify(tracked));
+};
+
+export const untrackSourceBook = (subscriptionId: string) => {
+  const tracked = getTrackedSourceBooks();
+  delete tracked[subscriptionId];
+  localStorage.setItem(TRACKED_BOOKS_KEY, JSON.stringify(tracked));
+};
 
 export const listBookSources = () =>
   serviceRequest<BookSourceItem[]>("/v1/book-sources");
@@ -105,6 +160,21 @@ export const createBookImport = (resultId: string) =>
     method: "POST",
     body: JSON.stringify({ result_id: resultId }),
   });
+
+export const listBookSubscriptions = () =>
+  serviceRequest<BookSubscription[]>("/v1/book-subscriptions");
+
+export const checkBookSubscription = (subscriptionId: string) =>
+  serviceRequest<BookSubscriptionCheck>(
+    `/v1/book-subscriptions/${encodeURIComponent(subscriptionId)}/check`,
+    { method: "POST", body: "{}" }
+  );
+
+export const createBookSubscriptionImport = (subscriptionId: string) =>
+  serviceRequest<BookImportJob>(
+    `/v1/book-subscriptions/${encodeURIComponent(subscriptionId)}/import`,
+    { method: "POST", body: "{}" }
+  );
 
 export const watchBookImport = (
   jobId: string,
