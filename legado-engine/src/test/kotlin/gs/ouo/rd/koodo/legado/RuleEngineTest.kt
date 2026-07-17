@@ -68,7 +68,7 @@ class RuleEngineTest {
         val source = BookSource(
             bookSourceUrl = "https://books.example",
             bookSourceName = "Data URL source",
-            searchUrl = "<js>`data:;base64,$encoded,{\"type\":\"json\"}`</js>"
+            searchUrl = "<js>const dataUrl = `data:;base64,$encoded,{\"type\":\"json\"}`; dataUrl;</js>"
         )
         val analyzeUrl = AnalyzeUrl(
             mUrl = source.searchUrl!!,
