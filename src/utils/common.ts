@@ -708,7 +708,9 @@ export const preCacheAllBooks = async (
         Kookit
       );
       const { buildBookCache } = await import("./file/bookCache");
-      await buildBookCache(selectedBook.key, result, rendition);
+      await buildBookCache(selectedBook.key, result, rendition, {
+        storage: BookUtil,
+      });
       toast.dismiss("add-book");
     } catch (error) {
       console.warn("pre-cache book failed", selectedBook.key, error);

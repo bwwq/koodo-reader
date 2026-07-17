@@ -381,7 +381,7 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
                 result.key,
                 file_content as ArrayBuffer,
                 rendition,
-                { replace: true }
+                { replace: true, storage: BookUtil }
               );
               options.onPrecacheStatus?.(cached ? "completed" : "failed");
               await CoverUtil.addCover(result as BookModel);
@@ -408,7 +408,8 @@ class ImportLocal extends React.Component<ImportLocalProps, ImportLocalState> {
               const cached = await buildBookCache(
                 result.key,
                 file_content as ArrayBuffer,
-                rendition
+                rendition,
+                { storage: BookUtil }
               );
               options.onPrecacheStatus?.(cached ? "completed" : "failed");
             }

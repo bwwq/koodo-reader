@@ -1,6 +1,4 @@
-import BookUtil from "./bookUtil";
-
-interface CacheStorage {
+export interface CacheStorage {
   addBook: (
     key: string,
     format: string,
@@ -11,7 +9,7 @@ interface CacheStorage {
 
 interface BuildBookCacheOptions {
   replace?: boolean;
-  storage?: CacheStorage;
+  storage: CacheStorage;
 }
 
 export const shouldPreCacheBook = (
@@ -26,9 +24,9 @@ export const buildBookCache = async (
   bookKey: string,
   buffer: ArrayBuffer,
   rendition: { preCache: (content: ArrayBuffer) => Promise<any> },
-  options: BuildBookCacheOptions = {}
+  options: BuildBookCacheOptions
 ): Promise<boolean> => {
-  const storage = options.storage || BookUtil;
+  const { storage } = options;
   try {
     if (options.replace) {
       await storage.deleteBook("cache-" + bookKey, "zip");
