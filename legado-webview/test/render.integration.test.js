@@ -60,7 +60,12 @@ test("renders JavaScript and returns the final page", async () => {
     if (!postResponse.ok) throw new Error(`POST render failed: ${postResponse.status} ${await postResponse.text()}`);
     assert.match((await postResponse.json()).body, /posted:chapter=one/);
   } finally {
-    child.kill("SIGTERM");
-    fixture.close();
+    await new Promise((resolve) => {
+      const force = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      child.once("exit", () => { clearTimeout(force); resolve(); });
+      child.kill("SIGTERM");
+    });
+    fixture.closeAllConnections?.();
+    await new Promise((resolve) => fixture.close(resolve));
   }
 });

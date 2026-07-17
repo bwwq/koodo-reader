@@ -20,6 +20,7 @@ const maxRenderPages = Number(process.env.WEBVIEW_MAX_RENDER_PAGES || 4);
 const maxBodyBytes = 10 * 1024 * 1024;
 let browserPromise;
 let proxyPromise;
+let filteringProxy;
 let activeRenders = 0;
 let pendingInteractive = 0;
 const pendingNamespaces = new Set();
@@ -138,6 +139,7 @@ const startFilteringProxy = () => proxyPromise ||= new Promise((resolve, reject)
       response.end(error.message);
     }
   });
+  filteringProxy = proxy;
   proxy.on("connect", async (request, clientSocket, head) => {
     try {
       const connectUrl = new URL(`https://${request.url}/`);
@@ -398,6 +400,15 @@ setInterval(async () => {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
   server.listen(port, "0.0.0.0", () => console.log(`Koodo Legado WebView 0.6.0 listening on :${port}`));
+  const shutdown = async () => {
+    for (const session of sessions.values()) await finishSession(session, true).catch(() => {});
+    if (browserPromise) await browserPromise.then((browser) => browser.close()).catch(() => {});
+    filteringProxy?.close();
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 5_000).unref();
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
 }
 
 export { htmlWithBase, isBlockedAddress };
