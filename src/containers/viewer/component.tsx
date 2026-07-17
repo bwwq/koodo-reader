@@ -31,7 +31,11 @@ import DatabaseService from "../../utils/storage/databaseService";
 import { getOcrResult, getOcrResultV2 } from "../../utils/request/reader";
 import { BookHelper } from "../../assets/lib/kookit.min";
 import { parseWithSystemOCR } from "../../utils/request/common";
-import { downloadStoredSourceBook } from "../../utils/request/bookSources";
+import {
+  downloadStoredSourceBook,
+  markStoredBookRevision,
+  refreshStoredSourceBookIfChanged,
+} from "../../utils/request/bookSources";
 import toast from "react-hot-toast";
 declare var window: any;
 let lock = false; //prevent from clicking too fasts
@@ -229,14 +233,39 @@ class Viewer extends React.Component<ViewerProps, ViewerState> {
     }
     let isCacheExsit = await BookUtil.isBookExist("cache-" + key, "zip", path);
     try {
-      let result: any = await BookUtil.fetchBook(
-        isCacheExsit ? "cache-" + key : key,
-        isCacheExsit ? "zip" : format.toLowerCase(),
-        true,
-        path
-      );
+      let result: any;
+      if (!isCacheExsit) {
+        try {
+          const refresh = await refreshStoredSourceBookIfChanged(
+            key,
+            format.toLowerCase()
+          );
+          if (refresh) {
+            await BookUtil.addBook(
+              key,
+              format.toLowerCase(),
+              refresh.buffer,
+              true
+            );
+            markStoredBookRevision(key, refresh.revision);
+            result = refresh.buffer;
+          }
+        } catch (error) {
+          console.warn("check stored book revision failed", error);
+        }
+      }
+      result =
+        result ||
+        (await BookUtil.fetchBook(
+          isCacheExsit ? "cache-" + key : key,
+          isCacheExsit ? "zip" : format.toLowerCase(),
+          true,
+          path
+        ));
       if (!result && !isCacheExsit) {
-        toast.loading("正在从服务端恢复图书文件…", { id: "restore-source-book" });
+        toast.loading("正在从服务端恢复图书文件…", {
+          id: "restore-source-book",
+        });
         result = await downloadStoredSourceBook(key, format.toLowerCase());
         await BookUtil.addBook(key, format.toLowerCase(), result, true);
         toast.success("图书文件已恢复", { id: "restore-source-book" });
@@ -276,12 +305,11 @@ class Viewer extends React.Component<ViewerProps, ViewerState> {
             this.props.currentBook.format,
             this.props.currentBook.key
           ),
-          fullTranslationMode:
-            ConfigService.getAllListConfig("fullTranslationBooks").includes(
-              this.props.currentBook.key
-            )
-              ? ConfigService.getReaderConfig("fullTranslationMode")
-              : "no",
+          fullTranslationMode: ConfigService.getAllListConfig(
+            "fullTranslationBooks"
+          ).includes(this.props.currentBook.key)
+            ? ConfigService.getReaderConfig("fullTranslationMode")
+            : "no",
           textOrientation: ConfigService.getReaderConfig("textOrientation"),
           isDarkMode:
             ConfigService.getReaderConfig("backgroundColor") ===

@@ -82,6 +82,30 @@ export interface BookSubscriptionCheck {
 
 const TRACKED_BOOKS_KEY = "source-book-subscriptions-v1";
 const COMPLETED_IMPORTS_KEY = "source-book-imports-completed-v1";
+const STORED_BOOK_REVISIONS_KEY = "source-book-file-revisions-v1";
+
+interface StoredBookRefresh {
+  buffer: ArrayBuffer;
+  revision: string;
+}
+
+const getStoredBookRevisions = (): Record<string, string> => {
+  try {
+    const value = JSON.parse(
+      localStorage.getItem(STORED_BOOK_REVISIONS_KEY) || "{}"
+    );
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+};
+
+export const markStoredBookRevision = (bookKey: string, revision: string) => {
+  if (!bookKey || !revision) return;
+  const revisions = getStoredBookRevisions();
+  revisions[bookKey] = revision;
+  localStorage.setItem(STORED_BOOK_REVISIONS_KEY, JSON.stringify(revisions));
+};
 
 export const getTrackedSourceBooks = (): Record<string, string> => {
   try {
@@ -107,8 +131,12 @@ export const untrackSourceBook = (subscriptionId: string) => {
 
 export const getCompletedBookImports = (): string[] => {
   try {
-    const value = JSON.parse(localStorage.getItem(COMPLETED_IMPORTS_KEY) || "[]");
-    return Array.isArray(value) ? value.filter((id) => typeof id === "string") : [];
+    const value = JSON.parse(
+      localStorage.getItem(COMPLETED_IMPORTS_KEY) || "[]"
+    );
+    return Array.isArray(value)
+      ? value.filter((id) => typeof id === "string")
+      : [];
   } catch {
     return [];
   }
@@ -220,7 +248,11 @@ export const getBookImportFormat = (file: File): string => {
   return match?.[1] || "epub";
 };
 
-export const claimBookImport = (jobId: string, bookKey: string, format: string) =>
+export const claimBookImport = (
+  jobId: string,
+  bookKey: string,
+  format: string
+) =>
   serviceRequest<{ book_key: string; format: string; size: number }>(
     `/v1/book-imports/${encodeURIComponent(jobId)}/claim`,
     {
@@ -258,4 +290,24 @@ export const downloadStoredSourceBook = async (
   );
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.arrayBuffer();
+};
+
+export const refreshStoredSourceBookIfChanged = async (
+  bookKey: string,
+  format: string
+): Promise<StoredBookRefresh | null> => {
+  const baseUrl = getServiceBaseUrl();
+  const token = await getServiceAccessToken();
+  if (!baseUrl || !token) return null;
+  const url = `${baseUrl}/v1/book-files/${encodeURIComponent(bookKey)}?format=${encodeURIComponent(format)}`;
+  const headers = { Authorization: `Bearer ${token}` };
+  const metadata = await fetch(url, { method: "HEAD", headers });
+  if (!metadata.ok) return null;
+  const revision =
+    metadata.headers.get("etag") ||
+    `${metadata.headers.get("last-modified") || ""}:${metadata.headers.get("content-length") || ""}`;
+  if (!revision || getStoredBookRevisions()[bookKey] === revision) return null;
+  const response = await fetch(url, { headers });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return { buffer: await response.arrayBuffer(), revision };
 };

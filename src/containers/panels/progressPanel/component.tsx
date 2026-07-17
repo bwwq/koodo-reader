@@ -113,7 +113,7 @@ class ProgressPanel extends React.Component<
     await this.props.htmlBook.rendition.goToChapterIndex(targetChapterIndex);
   };
   render() {
-    if (!this.props.htmlBook) {
+    if (!this.props.htmlBook || !this.props.currentBook?.format) {
       return <div className="progress-panel">Loading</div>;
     }
     let readerMode =

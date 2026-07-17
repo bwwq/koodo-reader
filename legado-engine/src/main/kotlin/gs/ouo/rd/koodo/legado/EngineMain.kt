@@ -41,8 +41,9 @@ private const val maxRequestBytes = 5 * 1024 * 1024
 private const val maxEpubBytes = 512L * 1024L * 1024L
 private const val maxChapters = 20_000
 private const val maxCoverBytes = 10 * 1024 * 1024
+internal const val epubChaptersPerDocument = 20
 
-private data class CoverAsset(val bytes: ByteArray, val mediaType: String, val extension: String)
+internal data class CoverAsset(val bytes: ByteArray, val mediaType: String, val extension: String)
 
 private class EngineJob(val id: String) {
     @Volatile var status = "queued"
@@ -343,7 +344,7 @@ private fun downloadCover(rawUrl: String?): CoverAsset? {
     }.getOrNull()
 }
 
-private fun writeEpub(book: Book, chapters: List<Pair<String, String>>, output: File, cover: CoverAsset?) {
+internal fun writeEpub(book: Book, chapters: List<Pair<String, String>>, output: File, cover: CoverAsset?) {
     output.parentFile.mkdirs()
     Files.newOutputStream(output.toPath()).use { raw ->
         ZipOutputStream(BufferedOutputStream(raw)).use { zip ->
@@ -362,10 +363,14 @@ private fun writeEpub(book: Book, chapters: List<Pair<String, String>>, output: 
   <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
 </container>""")
 
-            val chapterItems = chapters.indices.joinToString("\n") {
-                "<item id=\"c$it\" href=\"chapter-$it.xhtml\" media-type=\"application/xhtml+xml\"/>"
+            // Koodo builds its document list from spine items. Thousands of
+            // one-chapter documents make that initialization quadratic, so
+            // retain chapter-level anchors while bounding the spine size.
+            val documents = chapters.chunked(epubChaptersPerDocument)
+            val chapterItems = documents.indices.joinToString("\n") {
+                "<item id=\"p$it\" href=\"part-$it.xhtml\" media-type=\"application/xhtml+xml\"/>"
             }
-            val spine = chapters.indices.joinToString("\n") { "<itemref idref=\"c$it\"/>" }
+            val spine = documents.indices.joinToString("\n") { "<itemref idref=\"p$it\"/>" }
             val identifier = UUID.nameUUIDFromBytes(book.bookUrl.toByteArray()).toString()
             val coverManifest = cover?.let {
                 "<item id=\"cover-image\" href=\"cover.${it.extension}\" media-type=\"${it.mediaType}\" properties=\"cover-image\"/>"
@@ -390,18 +395,25 @@ private fun writeEpub(book: Book, chapters: List<Pair<String, String>>, output: 
                 zip.closeEntry()
             }
             val navItems = chapters.mapIndexed { index, pair ->
-                "<li><a href=\"chapter-$index.xhtml\">${xml(pair.first)}</a></li>"
+                val documentIndex = index / epubChaptersPerDocument
+                "<li><a href=\"part-$documentIndex.xhtml#chapter-$index\">${xml(pair.first)}</a></li>"
             }.joinToString("\n")
             zip.text("OEBPS/nav.xhtml", xhtml(book.name, "<nav epub:type=\"toc\" xmlns:epub=\"http://www.idpf.org/2007/ops\"><ol>$navItems</ol></nav>"))
-            chapters.forEachIndexed { index, pair ->
-                val clean = Jsoup.clean(
-                    pair.second,
-                    "",
-                    Safelist.relaxed().removeTags("script", "style", "iframe", "object", "embed"),
-                    org.jsoup.nodes.Document.OutputSettings().prettyPrint(false)
-                )
-                val body = if (clean.isBlank()) "<p></p>" else clean
-                zip.text("OEBPS/chapter-$index.xhtml", xhtml(pair.first, "<h1>${xml(pair.first)}</h1>$body"))
+            documents.forEachIndexed { documentIndex, documentChapters ->
+                val firstChapterIndex = documentIndex * epubChaptersPerDocument
+                val body = documentChapters.mapIndexed { offset, pair ->
+                    val chapterIndex = firstChapterIndex + offset
+                    val clean = Jsoup.clean(
+                        pair.second,
+                        "",
+                        Safelist.relaxed().removeTags("script", "style", "iframe", "object", "embed"),
+                        org.jsoup.nodes.Document.OutputSettings().prettyPrint(false)
+                    )
+                    val content = if (clean.isBlank()) "<p></p>" else clean
+                    "<section id=\"chapter-$chapterIndex\"><h1>${xml(pair.first)}</h1>$content</section>"
+                }.joinToString("\n")
+                val title = documentChapters.firstOrNull()?.first ?: book.name
+                zip.text("OEBPS/part-$documentIndex.xhtml", xhtml(title, body))
             }
         }
     }

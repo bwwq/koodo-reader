@@ -669,6 +669,10 @@ func TestReadyImportCanBeClaimedAndRecoveredByOwner(t *testing.T) {
 	if recovered.Code != http.StatusOK || recovered.Body.String() != string(content) {
 		t.Fatalf("recover claimed import: %d %q", recovered.Code, recovered.Body.String())
 	}
+	head := request(t, http.MethodHead, "/v1/book-files/1784262554674?format=epub", nil, bearer(admin["access_token"].(string)))
+	if head.Code != http.StatusOK || head.Header().Get("ETag") == "" || head.Body.Len() != 0 {
+		t.Fatalf("stored book metadata: status=%d etag=%q body=%q", head.Code, head.Header().Get("ETag"), head.Body.String())
+	}
 	isolated := request(t, http.MethodGet, "/v1/book-files/1784262554674?format=epub", nil, bearer(other["access_token"].(string)))
 	if isolated.Code != http.StatusNotFound {
 		t.Fatalf("other account read claimed file: %d %s", isolated.Code, isolated.Body.String())

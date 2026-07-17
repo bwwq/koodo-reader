@@ -1211,7 +1211,7 @@ func openReadyImportFile(ctx context.Context, userID, id string) (io.ReadCloser,
 }
 
 func handlePersistentBookFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeAPI(w, 405, 405, "请求方法不支持", nil)
 		return
 	}
@@ -1243,6 +1243,7 @@ func handlePersistentBookFile(w http.ResponseWriter, r *http.Request) {
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
+	w.Header().Set("ETag", fmt.Sprintf(`W/"%x-%x"`, info.ModTime().UnixNano(), info.Size()))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
 	http.ServeFile(w, r, target)
 }
