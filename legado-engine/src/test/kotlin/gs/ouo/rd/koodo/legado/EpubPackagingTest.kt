@@ -14,7 +14,11 @@ class EpubPackagingTest {
         val directory = Files.createTempDirectory("koodo-epub-test").toFile()
         val output = directory.resolve("grouped.epub")
         val chapters = (0 until 45).map { index ->
-            "Chapter $index" to "<p>Body $index</p>"
+            "Chapter $index" to if (index == 0) {
+                "　　&nbsp;&nbsp;First paragraph\n　　&nbsp;&nbsp;Second paragraph"
+            } else {
+                "<p>Body $index</p>"
+            }
         }
         val book = Book(
             bookUrl = "https://books.example/large",
@@ -44,6 +48,11 @@ class EpubPackagingTest {
                 assertTrue(first.contains("id=\"chapter-0\""))
                 assertTrue(first.contains("id=\"chapter-19\""))
                 assertFalse(first.contains("id=\"chapter-20\""))
+                assertTrue(first.contains("<p>First paragraph</p>"))
+                assertTrue(first.contains("<p>Second paragraph</p>"))
+                assertFalse(first.contains("&nbsp;First paragraph"))
+                assertTrue(first.contains("overflow-wrap:anywhere"))
+                assertTrue(first.contains("text-indent:2em"))
                 assertTrue(zip.text("OEBPS/part-2.xhtml").contains("Body 44"))
             }
         } finally {

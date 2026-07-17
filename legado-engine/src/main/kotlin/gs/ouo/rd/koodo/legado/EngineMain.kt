@@ -403,13 +403,7 @@ internal fun writeEpub(book: Book, chapters: List<Pair<String, String>>, output:
                 val firstChapterIndex = documentIndex * epubChaptersPerDocument
                 val body = documentChapters.mapIndexed { offset, pair ->
                     val chapterIndex = firstChapterIndex + offset
-                    val clean = Jsoup.clean(
-                        pair.second,
-                        "",
-                        Safelist.relaxed().removeTags("script", "style", "iframe", "object", "embed"),
-                        org.jsoup.nodes.Document.OutputSettings().prettyPrint(false)
-                    )
-                    val content = if (clean.isBlank()) "<p></p>" else clean
+                    val content = normalizeChapterContent(pair.second)
                     "<section id=\"chapter-$chapterIndex\"><h1>${xml(pair.first)}</h1>$content</section>"
                 }.joinToString("\n")
                 val title = documentChapters.firstOrNull()?.first ?: book.name
@@ -425,8 +419,47 @@ private fun ZipOutputStream.text(path: String, value: String) {
     closeEntry()
 }
 
+internal fun normalizeChapterContent(raw: String): String {
+    val clean = Jsoup.clean(
+        raw,
+        "",
+        Safelist.relaxed().removeTags("script", "style", "iframe", "object", "embed"),
+        org.jsoup.nodes.Document.OutputSettings().prettyPrint(false)
+    )
+    if (clean.isBlank()) return "<p></p>"
+
+    val document = Jsoup.parseBodyFragment(clean)
+    val body = document.body()
+    val onlyLineBreaks = body.children().all { it.tagName().equals("br", true) }
+    if (onlyLineBreaks) {
+        val text = org.jsoup.parser.Parser.unescapeEntities(
+            clean.replace(Regex("(?i)<br\\s*/?>"), "\n"),
+            false
+        )
+        val paragraphs = text
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .lineSequence()
+            .map { it.replace(Regex("^[\\s\\u00A0\\u3000]+|[\\s\\u00A0\\u3000]+$"), "") }
+            .filter { it.isNotEmpty() }
+            .map { "<p>${xml(it)}</p>" }
+            .toList()
+        return if (paragraphs.isEmpty()) "<p></p>" else paragraphs.joinToString("\n")
+    }
+    return body.html().ifBlank { "<p></p>" }
+}
+
 private fun xhtml(title: String, body: String) = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${xml(title)}</title><meta charset="utf-8"/></head><body>$body</body></html>"""
+<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${xml(title)}</title><meta charset="utf-8"/><style type="text/css">
+html,body{margin:0;padding:0;max-width:100%;}
+body,h1,p,li,blockquote,td,th{overflow-wrap:anywhere;word-wrap:break-word;}
+section{max-width:100%;}
+section+section{break-before:page;page-break-before:always;}
+p{margin:0 0 .8em;text-indent:2em;white-space:normal;}
+img,svg,video,canvas{max-width:100%;height:auto;}
+table{max-width:100%;table-layout:fixed;}
+pre{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;}
+</style></head><body>$body</body></html>"""
 
 private fun xml(value: String): String = value
     .replace("&", "&amp;")
