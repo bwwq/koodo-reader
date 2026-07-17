@@ -38,6 +38,11 @@ val legadoJsCompatibilityScript = """
   if (!Object.values) Object.values = function (value) { return Object.keys(value).map(function (key) { return value[key]; }); };
   if (!Object.entries) Object.entries = function (value) { return Object.keys(value).map(function (key) { return [key, value[key]]; }); };
   if (!Object.assign) Object.assign = function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] || {}; Object.keys(source).forEach(function (key) { target[key] = source[key]; }); } return target; };
+  var defineObjectMethod = function (name, value) { if (!Object.prototype[name]) Object.defineProperty(Object.prototype, name, { value: value, configurable: true, writable: true }); };
+  defineObjectMethod('includes', function (value, start) { return String(this).indexOf(value, start || 0) !== -1; });
+  defineObjectMethod('startsWith', function (value, start) { return String(this).indexOf(value, start || 0) === (start || 0); });
+  defineObjectMethod('endsWith', function (value, length) { var text = String(this); var end = length === undefined ? text.length : length; return text.substring(end - value.length, end) === value; });
+  defineObjectMethod('padStart', function (length, fill) { var text = String(this); var pad = fill === undefined ? ' ' : String(fill); while (text.length < length) text = pad + text; return text.slice(text.length - length); });
 })();
 """.trimIndent()
 
