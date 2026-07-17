@@ -39,7 +39,11 @@ jobs:
         working-directory: legado-engine
         env:
           LEGADO_ALLOWED_PRIVATE_HOSTS: 127.0.0.1
-        run: gradle --no-daemon test shadowJar
+        run: |
+          if ! gradle --no-daemon test shadowJar; then
+            find build/test-results/test -type f -name '*.xml' -maxdepth 2 -print -exec cat {} \; || true
+            exit 1
+          fi
       - name: Build hardened engine image
         run: docker build -f legado-engine/Dockerfile -t koodo-legado-engine:test .
 

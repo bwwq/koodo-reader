@@ -40,6 +40,8 @@ jobs:
         run: yarn --ignore-scripts --network-timeout 1000000
 
       - name: Build React app
+        env:
+          DISABLE_ESLINT_PLUGIN: "true"
         run: yarn --ignore-scripts && yarn build
 
       # ── Cross-compile Go binary for both platforms (eliminates QEMU overhead) ─

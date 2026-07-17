@@ -671,6 +671,7 @@ internal fun normalizeChapterContent(raw: String): String {
         "",
         Safelist.relaxed()
             .removeTags("script", "style", "iframe", "object", "embed")
+            .removeProtocols("img", "src", "http", "https")
             .preserveRelativeLinks(true),
         org.jsoup.nodes.Document.OutputSettings().prettyPrint(false)
     )
@@ -678,6 +679,12 @@ internal fun normalizeChapterContent(raw: String): String {
 
     val document = Jsoup.parseBodyFragment(clean)
     val body = document.body()
+    body.select("img[src]").forEach { image ->
+        val source = image.attr("src").trim()
+        if (!source.startsWith("images/") && !source.startsWith("data:image/")) {
+            image.removeAttr("src")
+        }
+    }
     val onlyLineBreaks = body.children().all { it.tagName().equals("br", true) }
     if (onlyLineBreaks) {
         val text = org.jsoup.parser.Parser.unescapeEntities(

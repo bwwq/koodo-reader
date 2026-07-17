@@ -68,14 +68,10 @@ fun installSandbox() {
         }
     }
     try {
-        try {
-            ContextFactory.initGlobal(SandboxContextFactory(shutter))
-        } catch (_: IllegalStateException) {
-            // Some upstream entity initializers touch Rhino before the engine
-            // bootstrap. Harden every subsequently-created context in that case.
-            ContextFactory.getGlobal().addListener(SandboxContextListener(shutter))
-        }
+        // The bundled ScriptEngine installs its own global factory. Load it
+        // first, then harden every context produced by that factory.
         Class.forName("com.script.javascript.RhinoScriptEngine")
+        ContextFactory.getGlobal().addListener(SandboxContextListener(shutter))
         ReaderAdapterHelper.setAdapter(IsolatedAdapter(File(dataDir, "runtime")))
     } catch (error: Throwable) {
         sandboxInstalled.set(false)
@@ -83,14 +79,11 @@ fun installSandbox() {
     }
 }
 
-private class SandboxContextFactory(private val shutter: ClassShutter) : ContextFactory() {
-    override fun makeContext(): Context = super.makeContext().also { configureRhinoContext(it, shutter) }
-
+private class DeadlineContextFactory : ContextFactory() {
     override fun observeInstructionCount(context: Context, instructionCount: Int) {
         val deadline = context.getThreadLocal(rhinoDeadlineKey) as? Long ?: return
         if (System.nanoTime() > deadline) throw EvaluatorException("JavaScript execution timed out")
     }
-
 }
 
 private class SandboxContextListener(private val shutter: ClassShutter) : ContextFactory.Listener {
@@ -99,10 +92,15 @@ private class SandboxContextListener(private val shutter: ClassShutter) : Contex
     override fun contextReleased(context: Context) = Unit
 }
 
+private val deadlineContextFactory = DeadlineContextFactory()
+private val contextFactoryField = Context::class.java.getDeclaredField("factory").apply { isAccessible = true }
+private val classShutterField = Context::class.java.getDeclaredField("classShutter").apply { isAccessible = true }
+
 private fun configureRhinoContext(context: Context, shutter: ClassShutter) {
     context.optimizationLevel = -1
     context.instructionObserverThreshold = 10_000
-    context.setClassShutter(shutter)
+    classShutterField.set(context, shutter)
+    contextFactoryField.set(context, deadlineContextFactory)
     context.putThreadLocal(
         rhinoDeadlineKey,
         System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(scriptDeadlineMillis.get() ?: 30_000L)
