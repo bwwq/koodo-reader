@@ -169,9 +169,8 @@ export const getStoredServiceUser = async (): Promise<ServiceUser | null> => {
 };
 
 export const isServiceSessionConnected = async (): Promise<boolean> => {
-  return Boolean(
-    getServiceBaseUrl() && (await TokenService.getToken(ACCESS_TOKEN_KEY))
-  );
+  if (!getServiceBaseUrl()) return false;
+  return Boolean(await getServiceAccessToken());
 };
 
 export const getBoundSyncUserId = (): string =>
@@ -271,11 +270,16 @@ export const serviceRequest = async <T>(
     const expiresAt = Number(
       (await TokenService.getToken(TOKEN_EXPIRES_KEY)) || "0"
     );
-    if (expiresAt && expiresAt < Date.now() + 30_000) {
-      await refreshSession();
+    let accessToken = await TokenService.getToken(ACCESS_TOKEN_KEY);
+    if (
+      (!accessToken || (expiresAt && expiresAt < Date.now() + 30_000)) &&
+      (await refreshSession())
+    ) {
+      accessToken = await TokenService.getToken(ACCESS_TOKEN_KEY);
     }
-    const accessToken = await TokenService.getToken(ACCESS_TOKEN_KEY);
-    if (!accessToken) return emptyResponse<T>(401, "Please sign in");
+    if (!accessToken) {
+      return emptyResponse<T>(401, "登录状态已失效，请重新登录");
+    }
     headers.set("Authorization", `Bearer ${accessToken}`);
   }
 
@@ -306,10 +310,14 @@ export const getServiceAccessToken = async (): Promise<string> => {
   const expiresAt = Number(
     (await TokenService.getToken(TOKEN_EXPIRES_KEY)) || "0"
   );
-  if (expiresAt && expiresAt < Date.now() + 30_000) {
-    await refreshSession();
+  let accessToken = await TokenService.getToken(ACCESS_TOKEN_KEY);
+  if (
+    (!accessToken || (expiresAt && expiresAt < Date.now() + 30_000)) &&
+    (await refreshSession())
+  ) {
+    accessToken = await TokenService.getToken(ACCESS_TOKEN_KEY);
   }
-  return (await TokenService.getToken(ACCESS_TOKEN_KEY)) || "";
+  return accessToken || "";
 };
 
 export const serviceStream = async (
@@ -320,7 +328,7 @@ export const serviceStream = async (
   const baseUrl = getServiceBaseUrl();
   const accessToken = await getServiceAccessToken();
   if (!baseUrl || !accessToken) {
-    return emptyResponse<null>(401, "Please sign in");
+    return emptyResponse<null>(401, "登录状态已失效，请重新登录");
   }
   const run = async (retry: boolean): Promise<ApiResponse<null>> => {
     try {

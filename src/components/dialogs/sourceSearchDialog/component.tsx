@@ -67,9 +67,9 @@ function SourceSearchDialog(props: Props) {
         setSelected([]);
         setSourceError(
           response.code === 400
-            ? "请先配置自托管服务地址。"
+            ? "尚未配置在线服务地址。"
             : response.code === 401
-            ? "请先登录自托管服务，书源和搜索任务会按账号保存。"
+            ? "当前账号的登录状态已失效，请重新登录。"
             : response.msg || "书源加载失败，请检查服务连接。"
         );
         return;
@@ -300,9 +300,9 @@ function SourceSearchDialog(props: Props) {
         <section className="source-results">
           {sourceError ? (
             <div className="source-empty source-auth-empty">
-              <b>{sourceError.includes("登录") ? "请先登录自托管服务" : "书源暂不可用"}</b>
+              <b>{sourceError.includes("登录") ? "需要重新登录" : "书源暂不可用"}</b>
               <span>{sourceError}</span>
-              <button onClick={openOnlineServiceSettings}>{sourceError.includes("登录") ? "去登录" : "去设置"}</button>
+              <button onClick={openOnlineServiceSettings}>{sourceError.includes("登录") ? "重新登录" : "去设置"}</button>
             </div>
           ) : (
             <>

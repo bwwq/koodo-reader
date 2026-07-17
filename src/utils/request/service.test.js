@@ -27,6 +27,7 @@ jest.mock("../../assets/lib/kookit-extra-browser.min", () => ({
 const {
   bindSyncToCurrentUser,
   canUseBoundOnlineSync,
+  serviceRequest,
   normalizeServiceBaseUrl,
 } = require("./service");
 
@@ -35,6 +36,11 @@ describe("online service isolation", () => {
     Object.keys(mockConfigItems).forEach((key) => delete mockConfigItems[key]);
     Object.keys(mockReaderConfig).forEach((key) => delete mockReaderConfig[key]);
     Object.keys(mockTokens).forEach((key) => delete mockTokens[key]);
+    global.fetch = jest.fn();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it("normalizes HTTP service addresses and rejects other protocols", () => {
@@ -73,5 +79,49 @@ describe("online service isolation", () => {
     mockConfigItems.serviceBaseUrl = "https://two.example.com";
     await expect(canUseBoundOnlineSync()).resolves.toBe(false);
     await expect(bindSyncToCurrentUser()).resolves.toBe(false);
+  });
+
+  it("restores an authenticated request when only the refresh token remains", async () => {
+    mockConfigItems.serviceBaseUrl = "https://reader.example.com";
+    mockTokens.service_refresh_token = "still-valid";
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({
+          code: 200,
+          msg: "success",
+          data: {
+            access_token: "renewed-access",
+            refresh_token: "renewed-refresh",
+            expires_in: 900,
+            user: { id: "user-a", username: "alice" },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ code: 200, msg: "success", data: [] }),
+      });
+
+    await expect(
+      serviceRequest("/v1/book-sources", { method: "GET" })
+    ).resolves.toMatchObject({ code: 200, data: [] });
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      1,
+      "https://reader.example.com/v1/auth/refresh",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      2,
+      "https://reader.example.com/v1/book-sources",
+      expect.objectContaining({ method: "GET", headers: expect.anything() })
+    );
+    const requestHeaders = global.fetch.mock.calls[1][1].headers;
+    expect(requestHeaders.get("Authorization")).toBe("Bearer renewed-access");
+    expect(mockTokens.service_access_token).toBe("renewed-access");
   });
 });
