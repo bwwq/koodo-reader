@@ -63,6 +63,10 @@ class RuleEngineTest {
         assertEquals("https://cdn.example/page.jpg", url)
         assertEquals("https://reader.example/chapter", headers["Referer"])
         assertEquals("https://cdn.example/page.jpg" to ",{\"headers\":{\"Referer\":\"https://reader.example/chapter\"}}", splitLegadoUrlOptions(raw))
+        assertEquals(
+            "https://books.example/chapter",
+            safeRemoteImageHeaders(mapOf("Referer" to "光遇聚合"), "https://books.example/chapter")["Referer"]
+        )
     }
 
     @Test

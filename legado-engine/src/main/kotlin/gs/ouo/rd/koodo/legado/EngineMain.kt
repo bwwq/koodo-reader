@@ -277,6 +277,20 @@ internal fun analyzeRemoteImageRequest(rawUrl: String, baseUrl: String, source: 
     return analyzed.url to analyzed.headerMap.toMap()
 }
 
+internal fun safeRemoteImageHeaders(headers: Map<String, String>, fallbackReferer: String): Map<String, String> {
+    val safe = linkedMapOf<String, String>()
+    headers.forEach { (name, value) ->
+        val validValue = value.all { it == '\t' || it.code in 0x20..0x7e }
+        if (!name.equals("Host", true) && validValue) safe[name] = value
+    }
+    val referer = safe.entries.firstOrNull { it.key.equals("Referer", true) }
+    if (referer != null && !referer.value.startsWith("http://", true) && !referer.value.startsWith("https://", true)) {
+        safe.remove(referer.key)
+    }
+    if (safe.keys.none { it.equals("Referer", true) } && fallbackReferer.isNotBlank()) safe["Referer"] = fallbackReferer
+    return safe
+}
+
 private data class StateRequest(
     val source: JsonObject,
     val namespace: String = "default"
@@ -623,13 +637,11 @@ private fun downloadRemoteImage(rawUrl: String, referer: String?, source: BookSo
     val fallbackReferer = referer?.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
         ?: source.bookSourceUrl
     val (requestUrl, headers) = analyzeRemoteImageRequest(rawUrl, fallbackReferer, source)
+    val safeHeaders = safeRemoteImageHeaders(headers, fallbackReferer)
     val request = Request.Builder().url(requestUrl).get().apply {
-        headers.forEach { (name, value) -> if (!name.equals("Host", true)) header(name, value) }
-        if (!headers.keys.any { it.equals("Referer", true) } && fallbackReferer.isNotBlank()) {
-            header("Referer", fallbackReferer)
-        }
+        safeHeaders.forEach { (name, value) -> header(name, value) }
         val cookie = io.legado.app.help.http.CookieStore(namespace).getCookie(requestUrl)
-        if (cookie.isNotBlank() && !headers.keys.any { it.equals("Cookie", true) }) header("Cookie", cookie)
+        if (cookie.isNotBlank() && !safeHeaders.keys.any { it.equals("Cookie", true) }) header("Cookie", cookie)
     }.build()
     val response = imageHttpClient.newCall(request).execute()
     response.use {
