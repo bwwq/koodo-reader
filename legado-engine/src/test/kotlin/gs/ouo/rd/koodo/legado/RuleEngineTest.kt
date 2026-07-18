@@ -1,5 +1,7 @@
 package gs.ouo.rd.koodo.legado
 
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.sun.net.httpserver.HttpServer
 import io.legado.app.data.entities.BookSource
 import io.legado.app.data.entities.rule.SearchRule
@@ -16,6 +18,27 @@ import java.net.InetSocketAddress
 import java.util.Base64
 
 class RuleEngineTest {
+    @Test
+    fun exposesLoginFormValuesAsNativeJavaScriptObject() {
+        installSandbox()
+        val source = BookSource(
+            bookSourceUrl = "https://books.example",
+            bookSourceName = "Login source"
+        )
+        val values = Gson().fromJson<Map<String, Any?>>(
+            """{"email":"reader@example.com","remember":true}""",
+            object : TypeToken<Map<String, Any?>>() {}.type
+        )
+
+        assertEquals(
+            "reader@example.com:true:object",
+            source.evalJS(
+                nativeActionValuesScript(values) +
+                    "\nresult.email + ':' + result.remember + ':' + typeof result"
+            ).toString()
+        )
+    }
+
     @Test
     fun acceptsWebViewSourcesWithGuardedEnvironmentProbes() {
         val source = validateSource(

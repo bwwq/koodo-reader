@@ -217,6 +217,11 @@ private data class ActionRequest(
     val namespace: String = "default"
 )
 
+internal fun nativeActionValuesScript(values: Map<String, Any?>): String {
+    val valuesJson = gson.toJson(values)
+    return "var result = JSON.parse(${gson.toJson(valuesJson)});"
+}
+
 private data class StateRequest(
     val source: JsonObject,
     val namespace: String = "default"
@@ -254,7 +259,7 @@ private fun handleActions(exchange: HttpExchange) {
                 val loginScript = source.getLoginJs().orEmpty()
                 setSourceMessageSink { message -> job.message = message }
                 try {
-                    source.evalJS("$loginScript\n${request.action}") { this["result"] = request.values }
+                    source.evalJS("${nativeActionValuesScript(request.values)}\n$loginScript\n${request.action}")
                 } finally {
                     source.removeLoginInfo()
                     setSourceMessageSink(null)
