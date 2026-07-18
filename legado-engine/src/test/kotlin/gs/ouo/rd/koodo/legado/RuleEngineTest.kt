@@ -91,6 +91,9 @@ class RuleEngineTest {
                 sources,
                 book_id,
             };
+            const options = JSON.stringify({ headers, default: 8 });
+            const action = (data, book) => { return data && book; };
+            try { action(result, catalog); } catch {}
             """.trimIndent()
         )
         assertFalse(converted.contains("{ source:sources, book_id }"))
@@ -100,6 +103,9 @@ class RuleEngineTest {
         assertTrue(converted.contains("var book_id = __legado_destructure_0[\"book_id\"]"))
         assertTrue(converted.contains("catalog[\"sources\"] = sources"))
         assertTrue(converted.contains("catalog[\"book_id\"] = book_id"))
+        assertTrue(converted.contains("{ \"headers\": headers, \"default\": 8 }"))
+        assertTrue(converted.contains("function(data, book) {"))
+        assertTrue(converted.contains("catch (__legado_error) {"))
     }
 
     @Test

@@ -171,17 +171,34 @@ internal fun legadoCompatibleJavaScript(script: String, convertObjectShorthand: 
             }
         }
     }
-    return Regex("(=\\s*\\{)([^{}]*)(})").replace(compatible) { match ->
-        val rawFields = match.groupValues[2].split(',')
+    compatible = Regex("(?<!\\$)\\{([^{}]*)}").replace(compatible) { match ->
+        val body = match.groupValues[1]
+        if (body.contains(';')) return@replace match.value
+        val rawFields = body.split(',')
+        var changed = false
+        var validObject = true
         val fields = rawFields.mapIndexedNotNull { index, raw ->
             val trimmed = raw.trim()
             if (trimmed.isEmpty() && index == rawFields.lastIndex) return@mapIndexedNotNull null
             if (trimmed.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*"))) {
+                changed = true
                 raw.replace(trimmed, "\"$trimmed\": $trimmed")
-            } else raw
+            } else {
+                val property = Regex("^([A-Za-z_$][A-Za-z0-9_$]*)\\s*:").find(trimmed)
+                if (property != null) {
+                    changed = true
+                    raw.replaceFirst(property.groupValues[1], "\"${property.groupValues[1]}\"")
+                } else {
+                    if (!trimmed.contains(':')) validObject = false
+                    raw
+                }
+            }
         }
-        match.groupValues[1] + fields.joinToString(",") + match.groupValues[3]
+        if (changed && validObject) "{" + fields.joinToString(",") + "}" else match.value
     }
+    compatible = Regex("\\(([^()]*)\\)\\s*=>\\s*\\{").replace(compatible, "function($1) {")
+    compatible = compatible.replace(Regex("\\bcatch\\s*\\{"), "catch (__legado_error) {")
+    return compatible
 }
 
 private fun configureRhinoContext(context: Context, shutter: ClassShutter) {
