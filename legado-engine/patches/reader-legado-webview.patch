@@ -276,7 +276,7 @@ diff --git a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt b/src/
 index 2cc200e..f41c96a 100644
 --- a/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt
 +++ b/src/main/java/io/legado/app/model/analyzeRule/AnalyzeRule.kt
-@@ -659,7 +659,19 @@ class AnalyzeRule(
+@@ -659,7 +659,12 @@ class AnalyzeRule(
          bindings["title"] = chapter?.title
          bindings["src"] = content
          bindings["nextChapterUrl"] = nextChapterUrl
@@ -286,14 +286,7 @@ index 2cc200e..f41c96a 100644
 +        val compatibleScript = gs.ouo.rd.koodo.legado.legadoCompatibleJavaScript(jsStr)
 +        val sourceScript = if (compatibleLibrary.isNullOrBlank()) compatibleScript else "$compatibleLibrary\n$compatibleScript"
 +        val script = "${gs.ouo.rd.koodo.legado.legadoJsCompatibilityScript}\n$sourceScript"
-+        return try {
-+            SCRIPT_ENGINE.eval(script, bindings)
-+        } catch (error: Throwable) {
-+            System.err.println(
-+                "Legado rule evaluation failed (${source?.getKey()}):\n" + compatibleScript.take(12_000)
-+            )
-+            throw error
-+        }
++        return SCRIPT_ENGINE.eval(script, bindings)
      }
 
      override fun getSource(): BaseSource? {

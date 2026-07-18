@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.Semaphore
+import java.util.concurrent.ThreadLocalRandom
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -37,8 +38,9 @@ private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
 internal val dataDir = File(System.getenv("LEGADO_DATA") ?: "/data")
 private val jobsDir = File(dataDir, "jobs")
 private val engineToken = System.getenv("LEGADO_ENGINE_TOKEN") ?: ""
-private val executor = Executors.newFixedThreadPool(2)
-private val imageExecutor = Executors.newFixedThreadPool(4)
+private val actionExecutor = Executors.newFixedThreadPool(2)
+private val importExecutor = Executors.newSingleThreadExecutor()
+private val imageExecutor = Executors.newSingleThreadExecutor()
 private val jobs = ConcurrentHashMap<String, EngineJob>()
 private val futures = ConcurrentHashMap<String, Future<*>>()
 private val actionJobs = ConcurrentHashMap<String, EngineActionJob>()
@@ -222,6 +224,39 @@ internal fun nativeActionValuesScript(values: Map<String, Any?>): String {
     return "var result = JSON.parse(${gson.toJson(valuesJson)});"
 }
 
+internal fun sanitizeSourceMessage(message: String, secrets: Collection<Any?> = emptyList()): String {
+    var sanitized = message.take(4_000)
+    if (sanitized.contains("\"headers\":", ignoreCase = true) &&
+        (sanitized.contains("\"body\":", ignoreCase = true) || sanitized.contains("\"cookie\":", ignoreCase = true))) {
+        return "书源请求处理中"
+    }
+    secrets.asSequence()
+        .mapNotNull { it?.toString()?.takeIf { value -> value.length >= 3 } }
+        .sortedByDescending { it.length }
+        .forEach { sanitized = sanitized.replace(it, "[redacted]") }
+    return sanitized
+}
+
+internal fun chapterPacingDelayMillis(rate: String?, jitterMillis: Long): Long {
+    val configured = rate?.trim().orEmpty()
+    val configuredDelay = when {
+        configured.isEmpty() -> 0L
+        '/' !in configured -> configured.toLongOrNull() ?: 0L
+        else -> {
+            val count = configured.substringBefore('/').toLongOrNull() ?: 0L
+            val window = configured.substringAfter('/').toLongOrNull() ?: 0L
+            if (count > 0) window / count else 0L
+        }
+    }
+    return maxOf(3_500L, configuredDelay) + jitterMillis.coerceIn(500L, 2_500L)
+}
+
+internal fun isSourceRateLimitMessage(message: String): Boolean {
+    val value = message.lowercase()
+    return listOf("访问次数", "访问上限", "请求频繁", "稍后再试", "限流", "rate limit", "too many requests", "http 429")
+        .any(value::contains)
+}
+
 private data class StateRequest(
     val source: JsonObject,
     val namespace: String = "default"
@@ -252,12 +287,12 @@ private fun handleActions(exchange: HttpExchange) {
         val id = UUID.randomUUID().toString()
         val job = EngineActionJob(id)
         actionJobs[id] = job
-        executor.submit {
+        actionExecutor.submit {
             try {
                 job.status = "running"
                 source.putLoginInfo(gson.toJson(request.values))
                 val loginScript = source.getLoginJs().orEmpty()
-                setSourceMessageSink { message -> job.message = message }
+                setSourceMessageSink { message -> job.message = sanitizeSourceMessage(message, request.values.values) }
                 try {
                     source.evalJS("${nativeActionValuesScript(request.values)}\n$loginScript\n${request.action}")
                 } finally {
@@ -334,7 +369,7 @@ private fun handleImports(exchange: HttpExchange) {
         val searchBook = gson.fromJson(request.book, SearchBook::class.java)
         val job = EngineJob(request.id)
         jobs[job.id] = job
-        futures[job.id] = executor.submit { buildBook(job, source, searchBook, request.namespace) }
+        futures[job.id] = importExecutor.submit { buildBook(job, source, searchBook, request.namespace) }
         return exchange.json(202, job.response())
     }
 
@@ -368,7 +403,7 @@ private fun handleImports(exchange: HttpExchange) {
 }
 
 private fun buildBook(job: EngineJob, source: BookSource, search: SearchBook, accountNamespace: String) {
-    setSourceMessageSink { message -> job.message = message }
+    setSourceMessageSink { message -> job.message = sanitizeSourceMessage(message) }
     try {
         val namespace = isolatedNamespace(accountNamespace, source.bookSourceUrl)
         job.status = "running"
@@ -397,6 +432,9 @@ private fun buildBook(job: EngineJob, source: BookSource, search: SearchBook, ac
         val contents = ArrayList<Pair<String, String>>(chapters.size)
         chapters.forEachIndexed { index, chapter ->
             if (Thread.currentThread().isInterrupted) throw InterruptedException("cancelled")
+            if (index > 0) {
+                Thread.sleep(chapterPacingDelayMillis(source.concurrentRate, ThreadLocalRandom.current().nextLong(500L, 2_501L)))
+            }
             var failure: Throwable? = null
             var content = ""
             repeat(3) { attempt ->
@@ -407,9 +445,16 @@ private fun buildBook(job: EngineJob, source: BookSource, search: SearchBook, ac
                             webBook.getBookContent(book, chapter, chapters.getOrNull(index + 1)?.url)
                         }
                     }
+                    if (content.isBlank()) failure = IllegalStateException("empty chapter content")
                 } catch (error: Throwable) {
                     failure = error
-                    if (attempt < 2) Thread.sleep((attempt + 1) * 500L)
+                }
+                if (content.isBlank() && isSourceRateLimitMessage(job.message)) {
+                    throw IllegalStateException("书源触发访问限制，任务已停止，请稍后重试")
+                }
+                if (content.isBlank() && attempt < 2) {
+                    val backoff = if (attempt == 0) 30_000L else 90_000L
+                    Thread.sleep(backoff + ThreadLocalRandom.current().nextLong(1_000L, 5_001L))
                 }
             }
             if (content.isBlank()) {
@@ -477,8 +522,7 @@ private fun localizeImages(
     val urls = pending.map { it.url }.distinct()
     job.current = 0
     job.total = urls.size
-    val configuredConcurrency = source.concurrentRate?.substringBefore('/')?.toIntOrNull()
-    val concurrency = if (source.concurrentRate.isNullOrBlank()) 4 else (configuredConcurrency ?: 1).coerceIn(1, 4)
+    val concurrency = 1
     val semaphore = Semaphore(concurrency)
     val imageFutures = urls.mapIndexed { index, imageUrl ->
         imageUrl to imageExecutor.submit<ImageAsset> {
