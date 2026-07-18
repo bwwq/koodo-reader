@@ -18,7 +18,7 @@ import (
 
 type sourceActionBinding struct {
 	AccountID, StateUserID, Namespace, SourceID, Script string
-	ExpiresAt                                            time.Time
+	ExpiresAt                                           time.Time
 }
 
 type sourceActionOwner struct {
