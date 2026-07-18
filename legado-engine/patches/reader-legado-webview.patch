@@ -389,13 +389,16 @@ index 77b8231..4fc3419 100644
          }
          val concurrentRecord = fetchStart()
          setCookie(source?.getKey())
-@@ -474,5 +480,5 @@ class AnalyzeUrl(
+@@ -474,7 +480,7 @@ class AnalyzeUrl(
          @Suppress("RegExpRedundantEscape")
 -        val dataUriFindResult = dataUriRegex.find(urlNoQuery)
 +        val dataUriFindResult = dataUriRegex.find(urlNoQuery.replace("\r", "").replace("\n", ""))
          @Suppress("BlockingMethodInNonBlockingContext")
          if (dataUriFindResult != null) {
-             val dataUriBase64 = dataUriFindResult.groupValues[1]
+-            val dataUriBase64 = dataUriFindResult.groupValues[1]
++            val dataUriBase64 = dataUriFindResult.groupValues[1].substringBefore(',')
+             val byteArray = Base64.decode(dataUriBase64, Base64.DEFAULT)
+             fetchEnd(concurrentRecord)
 diff --git a/src/main/java/io/legado/app/model/webBook/BookInfo.kt b/src/main/java/io/legado/app/model/webBook/BookInfo.kt
 index 1b1d31f..94af81d 100644
 --- a/src/main/java/io/legado/app/model/webBook/BookInfo.kt

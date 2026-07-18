@@ -139,6 +139,7 @@ class RuleEngineTest {
         val directResponse = runBlocking { direct.getStrResponseAwait() }
         assertEquals("json", direct.type)
         assertTrue(directResponse.body()?.isNotBlank() == true)
+        assertEquals(payload, String(runBlocking { direct.getByteArrayAwait() }))
     }
 
     @Test
