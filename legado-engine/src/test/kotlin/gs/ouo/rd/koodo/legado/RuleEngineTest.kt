@@ -44,9 +44,9 @@ class RuleEngineTest {
         val request = """https://books.example/login,{"headers":{"cookie":"token=secret"},"body":"{\"password\":\"secret\"}"}"""
         assertEquals("书源请求处理中", sanitizeSourceMessage(request, listOf("secret")))
         assertEquals("account=[redacted]", sanitizeSourceMessage("account=reader@example.com", listOf("reader@example.com")))
-        assertEquals(900L, chapterPacingDelayMillis(null, 200L))
-        assertEquals(5_500L, chapterPacingDelayMillis("5000", 500L))
-        assertEquals(900L, chapterPacingDelayMillis("2/1000", 200L))
+        assertEquals(550L, chapterPacingIntervalMillis(null, 50L))
+        assertEquals(5_250L, chapterPacingIntervalMillis("5000", 250L))
+        assertEquals(550L, chapterPacingIntervalMillis("2/1000", 50L))
         assertTrue(isSourceRateLimitMessage("今日访问次数已达上限，请稍后再试"))
         assertFalse(isSourceRateLimitMessage("正在获取章节"))
     }

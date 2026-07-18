@@ -237,7 +237,7 @@ internal fun sanitizeSourceMessage(message: String, secrets: Collection<Any?> = 
     return sanitized
 }
 
-internal fun chapterPacingDelayMillis(rate: String?, jitterMillis: Long): Long {
+internal fun chapterPacingIntervalMillis(rate: String?, jitterMillis: Long): Long {
     val configured = rate?.trim().orEmpty()
     val configuredDelay = when {
         configured.isEmpty() -> 0L
@@ -248,7 +248,7 @@ internal fun chapterPacingDelayMillis(rate: String?, jitterMillis: Long): Long {
             if (count > 0) window / count else 0L
         }
     }
-    return maxOf(700L, configuredDelay) + jitterMillis.coerceIn(200L, 500L)
+    return maxOf(500L, configuredDelay) + jitterMillis.coerceIn(50L, 250L)
 }
 
 internal fun isSourceRateLimitMessage(message: String): Boolean {
@@ -430,11 +430,18 @@ private fun buildBook(job: EngineJob, source: BookSource, search: SearchBook, ac
         job.latestChapter = chapters.last().title
         job.latestChapterUrl = chapters.last().url
         val contents = ArrayList<Pair<String, String>>(chapters.size)
+        var previousChapterStartedAt = 0L
         chapters.forEachIndexed { index, chapter ->
             if (Thread.currentThread().isInterrupted) throw InterruptedException("cancelled")
             if (index > 0) {
-                Thread.sleep(chapterPacingDelayMillis(source.concurrentRate, ThreadLocalRandom.current().nextLong(200L, 501L)))
+                val interval = chapterPacingIntervalMillis(
+                    source.concurrentRate,
+                    ThreadLocalRandom.current().nextLong(50L, 251L)
+                )
+                val remaining = previousChapterStartedAt + interval - System.currentTimeMillis()
+                if (remaining > 0) Thread.sleep(remaining)
             }
+            previousChapterStartedAt = System.currentTimeMillis()
             var failure: Throwable? = null
             var content = ""
             repeat(3) { attempt ->
