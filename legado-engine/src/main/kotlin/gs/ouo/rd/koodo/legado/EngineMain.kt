@@ -521,7 +521,8 @@ private fun downloadImage(rawUrl: String, referer: String?, source: BookSource, 
         val header = rawUrl.substringBefore(',')
         if (rawUrl.length - header.length > maxImageBytes * 2) throw IllegalStateException("image exceeds 20 MiB")
         val mediaType = header.substringAfter("data:").substringBefore(';').lowercase()
-        val bytes = decodeEmbeddedImageData(rawUrl, header.contains(";base64", true))
+        var bytes = decodeEmbeddedImageData(rawUrl, header.contains(";base64", true))
+        if (mediaType == "image/svg+xml") bytes = sanitizeSvg(bytes)
         if (bytes.size > maxImageBytes) throw IllegalStateException("image exceeds 20 MiB")
         val ext = imageExtension(mediaType) ?: throw IllegalStateException("unsupported embedded image type")
         return ImageAsset("images/page-$index.$ext", bytes, mediaType)
@@ -564,7 +565,16 @@ private fun imageExtension(mediaType: String): String? = when (mediaType.lowerca
     "image/png" -> "png"
     "image/gif" -> "gif"
     "image/webp" -> "webp"
+    "image/svg+xml" -> "svg"
     else -> null
+}
+
+internal fun sanitizeSvg(bytes: ByteArray): ByteArray {
+    val text = String(bytes, StandardCharsets.UTF_8)
+        .replace(Regex("(?is)<script\\b[^>]*>.*?</script>"), "")
+        .replace(Regex("(?i)\\s+on[a-z]+\\s*=\\s*(?:\"[^\"]*\"|'[^']*')"), "")
+        .replace(Regex("(?i)\\s+(?:href|xlink:href)\\s*=\\s*(?:\"https?://[^\"]*\"|'https?://[^']*')"), "")
+    return text.toByteArray(StandardCharsets.UTF_8)
 }
 
 private fun detectImageType(declaredType: String, bytes: ByteArray): String? {

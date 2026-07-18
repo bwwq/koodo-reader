@@ -119,6 +119,14 @@ class RuleEngineTest {
     }
 
     @Test
+    fun sanitizesEmbeddedSvgScriptsAndHandlers() {
+        val svg = "<svg onclick=\"alert(1)\"><script>alert(2)</script><path/></svg>"
+        val clean = String(sanitizeSvg(svg.toByteArray()))
+        assertFalse(clean.contains("script", ignoreCase = true))
+        assertFalse(clean.contains("onclick", ignoreCase = true))
+    }
+
+    @Test
     fun decodesMultilineDataUrlsReturnedBySourceJavaScript() {
         val payload = "{\"ok\":true}"
         val encoded = Base64.getMimeEncoder(8, "\n".toByteArray()).encodeToString(payload.toByteArray())
