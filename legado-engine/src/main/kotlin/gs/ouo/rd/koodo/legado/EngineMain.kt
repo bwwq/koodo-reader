@@ -248,7 +248,7 @@ internal fun chapterPacingDelayMillis(rate: String?, jitterMillis: Long): Long {
             if (count > 0) window / count else 0L
         }
     }
-    return maxOf(3_500L, configuredDelay) + jitterMillis.coerceIn(500L, 2_500L)
+    return maxOf(700L, configuredDelay) + jitterMillis.coerceIn(200L, 500L)
 }
 
 internal fun isSourceRateLimitMessage(message: String): Boolean {
@@ -433,7 +433,7 @@ private fun buildBook(job: EngineJob, source: BookSource, search: SearchBook, ac
         chapters.forEachIndexed { index, chapter ->
             if (Thread.currentThread().isInterrupted) throw InterruptedException("cancelled")
             if (index > 0) {
-                Thread.sleep(chapterPacingDelayMillis(source.concurrentRate, ThreadLocalRandom.current().nextLong(500L, 2_501L)))
+                Thread.sleep(chapterPacingDelayMillis(source.concurrentRate, ThreadLocalRandom.current().nextLong(200L, 501L)))
             }
             var failure: Throwable? = null
             var content = ""
