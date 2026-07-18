@@ -287,7 +287,11 @@ internal fun safeRemoteImageHeaders(headers: Map<String, String>, fallbackRefere
     if (referer != null && !referer.value.startsWith("http://", true) && !referer.value.startsWith("https://", true)) {
         safe.remove(referer.key)
     }
-    if (safe.keys.none { it.equals("Referer", true) } && fallbackReferer.isNotBlank()) safe["Referer"] = fallbackReferer
+    val safeFallback = fallbackReferer.takeIf {
+        (it.startsWith("http://", true) || it.startsWith("https://", true)) &&
+            it.all { char -> char == '\t' || char.code in 0x20..0x7e }
+    }
+    if (safe.keys.none { it.equals("Referer", true) } && safeFallback != null) safe["Referer"] = safeFallback
     return safe
 }
 
@@ -634,10 +638,18 @@ private fun downloadImage(rawUrl: String, referer: String?, source: BookSource, 
 }
 
 private fun downloadRemoteImage(rawUrl: String, referer: String?, source: BookSource, namespace: String, index: Int): ImageAsset {
-    val fallbackReferer = referer?.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
-        ?: source.bookSourceUrl
-    val (requestUrl, headers) = analyzeRemoteImageRequest(rawUrl, fallbackReferer, source)
-    val safeHeaders = safeRemoteImageHeaders(headers, fallbackReferer)
+    val preferredReferer = listOfNotNull(referer, source.bookSourceUrl).firstOrNull {
+        it.startsWith("http://", true) || it.startsWith("https://", true)
+    }.orEmpty()
+    val rawRequestUrl = splitLegadoUrlOptions(rawUrl).first
+    val analysisBase = preferredReferer.ifBlank {
+        rawRequestUrl.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }.orEmpty()
+    }
+    val (requestUrl, headers) = analyzeRemoteImageRequest(rawUrl, analysisBase, source)
+    val requestOrigin = runCatching {
+        URI(requestUrl).let { "${it.scheme}://${it.rawAuthority}/" }
+    }.getOrDefault("")
+    val safeHeaders = safeRemoteImageHeaders(headers, preferredReferer.ifBlank { requestOrigin })
     val request = Request.Builder().url(requestUrl).get().apply {
         safeHeaders.forEach { (name, value) -> header(name, value) }
         val cookie = io.legado.app.help.http.CookieStore(namespace).getCookie(requestUrl)

@@ -67,6 +67,7 @@ class RuleEngineTest {
             "https://books.example/chapter",
             safeRemoteImageHeaders(mapOf("Referer" to "光遇聚合"), "https://books.example/chapter")["Referer"]
         )
+        assertFalse(safeRemoteImageHeaders(emptyMap(), "光遇聚合").containsKey("Referer"))
     }
 
     @Test
