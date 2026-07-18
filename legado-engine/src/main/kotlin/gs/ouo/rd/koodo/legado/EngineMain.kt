@@ -9,6 +9,7 @@ import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookSource
 import io.legado.app.data.entities.SearchBook
 import io.legado.app.help.http.okHttpClient
+import io.legado.app.model.analyzeRule.AnalyzeUrl
 import io.legado.app.model.webBook.WebBook
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -30,6 +31,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.Semaphore
 import java.util.concurrent.ThreadLocalRandom
+import java.util.concurrent.TimeUnit
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -44,6 +46,14 @@ private val imageExecutor = Executors.newSingleThreadExecutor()
 private val jobs = ConcurrentHashMap<String, EngineJob>()
 private val futures = ConcurrentHashMap<String, Future<*>>()
 private val actionJobs = ConcurrentHashMap<String, EngineActionJob>()
+private val imageHttpClient by lazy {
+    okHttpClient.newBuilder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
+        .callTimeout(120, TimeUnit.SECONDS)
+        .build()
+}
 private const val maxRequestBytes = 5 * 1024 * 1024
 private const val maxEpubBytes = 512L * 1024L * 1024L
 private const val maxChapters = 20_000
@@ -255,6 +265,16 @@ internal fun isSourceRateLimitMessage(message: String): Boolean {
     val value = message.lowercase()
     return listOf("访问次数", "访问上限", "请求频繁", "稍后再试", "限流", "rate limit", "too many requests", "http 429")
         .any(value::contains)
+}
+
+internal fun splitLegadoUrlOptions(value: String): Pair<String, String> {
+    val options = Regex(",\\s*(?=\\{)").find(value) ?: return value to ""
+    return value.substring(0, options.range.first) to value.substring(options.range.first)
+}
+
+internal fun analyzeRemoteImageRequest(rawUrl: String, baseUrl: String, source: BookSource): Pair<String, Map<String, String>> {
+    val analyzed = synchronized(source) { AnalyzeUrl(rawUrl, baseUrl = baseUrl, source = source) }
+    return analyzed.url to analyzed.headerMap.toMap()
 }
 
 private data class StateRequest(
@@ -510,15 +530,18 @@ private fun localizeImages(
         document.select("img").forEach { image ->
             val candidate = listOf("src", "data-src", "data-original", "data-lazy-src", "data-url")
                 .asSequence().map { image.attr(it).trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()
-            val raw = if (candidate.startsWith("http", true)) candidate.substringBefore(",{") else candidate
-            if (raw.isBlank()) {
+            if (candidate.isBlank()) {
                 image.remove()
                 return@forEach
             }
             val resolved = when {
-                raw.startsWith("data:image/", true) -> raw
-                raw.startsWith("http://", true) || raw.startsWith("https://", true) -> raw
-                else -> runCatching { URI(chapterUrls.getOrNull(chapterIndex).orEmpty()).resolve(raw).toString() }.getOrDefault("")
+                candidate.startsWith("data:image/", true) -> candidate
+                candidate.startsWith("http://", true) || candidate.startsWith("https://", true) -> candidate
+                else -> {
+                    val (path, suffix) = splitLegadoUrlOptions(candidate)
+                    runCatching { URI(chapterUrls.getOrNull(chapterIndex).orEmpty()).resolve(path).toString() + suffix }
+                        .getOrDefault("")
+                }
             }
             if (resolved.isBlank() || (!resolved.startsWith("data:image/", true) && !resolved.startsWith("http", true))) {
                 image.remove()
@@ -583,16 +606,32 @@ private fun downloadImage(rawUrl: String, referer: String?, source: BookSource, 
         val ext = imageExtension(mediaType) ?: throw IllegalStateException("unsupported embedded image type")
         return ImageAsset("images/page-$index.$ext", bytes, mediaType)
     }
-    val headers = synchronized(source) {
-        runCatching { source.getHeaderMap(true) }.getOrElse { hashMapOf() }
+    var failure: Throwable? = null
+    repeat(3) { attempt ->
+        try {
+            return downloadRemoteImage(rawUrl, referer, source, namespace, index)
+        } catch (error: Throwable) {
+            failure = error
+            if (attempt < 2) Thread.sleep(if (attempt == 0) 2_000L else 5_000L)
+        }
     }
-    val request = Request.Builder().url(rawUrl).get().apply {
+    val host = runCatching { URI(splitLegadoUrlOptions(rawUrl).first).host }.getOrNull().orEmpty()
+    throw IllegalStateException("image ${index + 1} download failed${if (host.isBlank()) "" else " from $host"}: ${failure?.message}")
+}
+
+private fun downloadRemoteImage(rawUrl: String, referer: String?, source: BookSource, namespace: String, index: Int): ImageAsset {
+    val fallbackReferer = referer?.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
+        ?: source.bookSourceUrl
+    val (requestUrl, headers) = analyzeRemoteImageRequest(rawUrl, fallbackReferer, source)
+    val request = Request.Builder().url(requestUrl).get().apply {
         headers.forEach { (name, value) -> if (!name.equals("Host", true)) header(name, value) }
-        if (!referer.isNullOrBlank()) header("Referer", referer)
-        val cookie = io.legado.app.help.http.CookieStore(namespace).getCookie(rawUrl)
-        if (cookie.isNotBlank()) header("Cookie", cookie)
+        if (!headers.keys.any { it.equals("Referer", true) } && fallbackReferer.isNotBlank()) {
+            header("Referer", fallbackReferer)
+        }
+        val cookie = io.legado.app.help.http.CookieStore(namespace).getCookie(requestUrl)
+        if (cookie.isNotBlank() && !headers.keys.any { it.equals("Cookie", true) }) header("Cookie", cookie)
     }.build()
-    val response = okHttpClient.newCall(request).execute()
+    val response = imageHttpClient.newCall(request).execute()
     response.use {
         if (!it.isSuccessful) throw IllegalStateException("image download failed: HTTP ${it.code}")
         val body = it.body ?: throw IllegalStateException("empty image response")

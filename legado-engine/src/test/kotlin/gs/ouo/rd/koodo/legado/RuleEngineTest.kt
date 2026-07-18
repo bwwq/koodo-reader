@@ -52,6 +52,20 @@ class RuleEngineTest {
     }
 
     @Test
+    fun preservesLegadoOptionsForRemoteComicImages() {
+        val source = BookSource(
+            bookSourceUrl = "https://books.example",
+            bookSourceName = "Comic source"
+        )
+        val raw = """https://cdn.example/page.jpg,{"headers":{"Referer":"https://reader.example/chapter"}}"""
+        val (url, headers) = analyzeRemoteImageRequest(raw, "https://books.example/chapter", source)
+
+        assertEquals("https://cdn.example/page.jpg", url)
+        assertEquals("https://reader.example/chapter", headers["Referer"])
+        assertEquals("https://cdn.example/page.jpg" to ",{\"headers\":{\"Referer\":\"https://reader.example/chapter\"}}", splitLegadoUrlOptions(raw))
+    }
+
+    @Test
     fun acceptsWebViewSourcesWithGuardedEnvironmentProbes() {
         val source = validateSource(
             """{"bookSourceUrl":"https://books.example","bookSourceName":"WebView source","searchUrl":"<js>try { Packages.example.Client } catch(e) {}; 'https://books.example,{\"webView\":true}'</js>"}"""
