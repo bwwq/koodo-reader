@@ -94,6 +94,7 @@ class RuleEngineTest {
             const options = JSON.stringify({ headers, default: 8 });
             const action = (data, book) => { return data && book; };
             try { action(result, catalog); } catch {}
+            const searchUrl = '/search?key={{key}}&page={{page}}';
             """.trimIndent()
         )
         assertFalse(converted.contains("{ source:sources, book_id }"))
@@ -106,6 +107,7 @@ class RuleEngineTest {
         assertTrue(converted.contains("{ \"headers\": headers, \"default\": 8 }"))
         assertTrue(converted.contains("function(data, book) {"))
         assertTrue(converted.contains("catch (__legado_error) {"))
+        assertTrue(converted.contains("{{key}}&page={{page}}"))
     }
 
     @Test

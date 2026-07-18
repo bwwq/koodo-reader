@@ -171,7 +171,7 @@ internal fun legadoCompatibleJavaScript(script: String, convertObjectShorthand: 
             }
         }
     }
-    compatible = Regex("(?<!\\$)\\{([^{}]*)}").replace(compatible) { match ->
+    compatible = Regex("(?<![\\$\\{])\\{(?!\\{)([^{}]*)}").replace(compatible) { match ->
         val body = match.groupValues[1]
         if (body.contains(';')) return@replace match.value
         val rawFields = body.split(',')
