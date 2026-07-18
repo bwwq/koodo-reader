@@ -13,6 +13,7 @@ export interface BookSourceItem {
   url: string;
   enabled: boolean;
   built_in?: boolean;
+  shared?: boolean;
   searchable: boolean;
   features?: string[];
   compatibility?: { status: "compatible" | "partial" | "incompatible"; reasons?: string[] };

@@ -585,6 +585,31 @@ func TestBookSourcesRequireLoginAndAreIsolated(t *testing.T) {
 	if !strings.Contains(userList.Body.String(), "User source") || strings.Contains(userList.Body.String(), "Admin source") {
 		t.Fatalf("user source isolation failed: %s", userList.Body.String())
 	}
+	var adminID, userID, sharedSourceID string
+	if err := db.QueryRow(`SELECT id FROM users WHERE username='source-admin'`).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT id FROM book_sources WHERE user_id=? AND name='Admin source'`, adminID).Scan(&sharedSourceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT id FROM users WHERE username='source-user'`).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO shared_book_sources(source_id,updated_at) VALUES(?,?)`, sharedSourceID, time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+	userList = request(t, http.MethodGet, "/v1/book-sources", nil, bearer(userToken))
+	if !strings.Contains(userList.Body.String(), "Admin source") || !strings.Contains(userList.Body.String(), `"shared":true`) {
+		t.Fatalf("shared source was not visible: %s", userList.Body.String())
+	}
+	shared, err := loadAccessibleBookSource(userID, sharedSourceID)
+	if err != nil || !shared.Shared || sourceNamespace("requesting-user", shared) != "shared-source:"+sharedSourceID {
+		t.Fatalf("shared source namespace failed: %#v %v", shared, err)
+	}
+	patchShared := request(t, http.MethodPatch, "/v1/book-sources/"+sharedSourceID, map[string]any{"enabled": false}, bearer(userToken))
+	if patchShared.Code != http.StatusForbidden {
+		t.Fatalf("non-admin changed shared source: %d %s", patchShared.Code, patchShared.Body.String())
+	}
 	forbidden := request(t, http.MethodPost, "/v1/book-sources/import", map[string]any{
 		"bookSourceUrl": "https://unsafe.example", "bookSourceName": "Unsafe",
 		"searchUrl": "<js>Packages.java.lang.Runtime.getRuntime()</js>",

@@ -39,12 +39,14 @@ type bookSource struct {
 	URL           string          `json:"url"`
 	Enabled       bool            `json:"enabled"`
 	BuiltIn       bool            `json:"built_in,omitempty"`
+	Shared        bool            `json:"shared,omitempty"`
 	Searchable    bool            `json:"searchable"`
 	Definition    json.RawMessage `json:"-"`
 	UpdatedAt     int64           `json:"updated_at,omitempty"`
 	Features      []string        `json:"features,omitempty"`
 	Compatibility map[string]any  `json:"compatibility,omitempty"`
 	LoginState    string          `json:"login_state,omitempty"`
+	OwnerID       string          `json:"-"`
 }
 
 type cachedSearchResult struct {
@@ -145,6 +147,30 @@ func decorateBookSource(source *bookSource, userID, definition string) {
 	_ = db.QueryRow(`SELECT state FROM book_source_login_state WHERE user_id=? AND source_id=?`, userID, source.ID).Scan(&source.LoginState)
 }
 
+func sourceNamespace(userID string, source bookSource) string {
+	if source.Shared {
+		return "shared-source:" + source.ID
+	}
+	return userID
+}
+
+func loadAccessibleBookSource(userID, sourceID string) (bookSource, error) {
+	var source bookSource
+	var enabled, shared int
+	var definition string
+	err := db.QueryRow(`SELECT b.id,b.user_id,b.type,b.name,b.group_name,b.source_url,b.enabled,b.definition,b.updated_at,
+		CASE WHEN s.source_id IS NULL THEN 0 ELSE 1 END
+		FROM book_sources b LEFT JOIN shared_book_sources s ON s.source_id=b.id
+		WHERE b.id=? AND (b.user_id=? OR s.source_id IS NOT NULL)`, sourceID, userID).
+		Scan(&source.ID, &source.OwnerID, &source.Type, &source.Name, &source.Group, &source.URL, &enabled, &definition, &source.UpdatedAt, &shared)
+	if err != nil {
+		return source, err
+	}
+	source.Enabled, source.Searchable, source.Shared = enabled == 1, true, shared == 1
+	source.Definition = json.RawMessage(definition)
+	return source, nil
+}
+
 func detectLegadoMediaType(fields map[string]any) string {
 	if value, ok := fields["type"].(float64); ok {
 		switch int(value) {
@@ -189,6 +215,10 @@ func initBookSourceSchema() []string {
 			UNIQUE(user_id,type,source_url)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_book_sources_user ON book_sources(user_id,enabled)`,
+		`CREATE TABLE IF NOT EXISTS shared_book_sources (
+			source_id TEXT PRIMARY KEY REFERENCES book_sources(id) ON DELETE CASCADE,
+			updated_at INTEGER NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS book_source_login_state (
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			source_id TEXT NOT NULL REFERENCES book_sources(id) ON DELETE CASCADE,
@@ -310,7 +340,10 @@ func handleListBookSources(w http.ResponseWriter, r *http.Request) {
 	for index := range items {
 		items[index].MediaDefaults()
 	}
-	rows, err := db.Query(`SELECT id,type,name,group_name,source_url,enabled,definition,updated_at FROM book_sources WHERE user_id=? ORDER BY name COLLATE NOCASE`, auth.User.ID)
+	rows, err := db.Query(`SELECT b.id,b.user_id,b.type,b.name,b.group_name,b.source_url,b.enabled,b.definition,b.updated_at,
+		CASE WHEN s.source_id IS NULL THEN 0 ELSE 1 END
+		FROM book_sources b LEFT JOIN shared_book_sources s ON s.source_id=b.id
+		WHERE b.user_id=? OR s.source_id IS NOT NULL ORDER BY b.name COLLATE NOCASE`, auth.User.ID)
 	if err != nil {
 		writeAPI(w, 500, 500, "读取书源失败", nil)
 		return
@@ -318,14 +351,18 @@ func handleListBookSources(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	for rows.Next() {
 		var item bookSource
-		var enabled int
+		var enabled, shared int
 		var definition string
-		if err := rows.Scan(&item.ID, &item.Type, &item.Name, &item.Group, &item.URL, &enabled, &definition, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.OwnerID, &item.Type, &item.Name, &item.Group, &item.URL, &enabled, &definition, &item.UpdatedAt, &shared); err != nil {
 			continue
 		}
-		item.Enabled, item.Searchable = enabled == 1, true
+		item.Enabled, item.Searchable, item.Shared = enabled == 1, true, shared == 1
 		item.Definition = json.RawMessage(definition)
-		decorateBookSource(&item, auth.User.ID, definition)
+		stateOwner := auth.User.ID
+		if item.Shared {
+			stateOwner = item.OwnerID
+		}
+		decorateBookSource(&item, stateOwner, definition)
 		items = append(items, item)
 	}
 	writeAPI(w, 200, 200, "success", items)
@@ -477,14 +514,23 @@ func handleBookSourceItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 2 && parts[1] == "session" && r.Method == http.MethodDelete {
-		var sourceURL, definition string
-		if db.QueryRow(`SELECT source_url,definition FROM book_sources WHERE id=? AND user_id=?`, id, auth.User.ID).Scan(&sourceURL, &definition) != nil {
+		source, err := loadAccessibleBookSource(auth.User.ID, id)
+		if err != nil {
 			writeAPI(w, 404, 404, "书源不存在", nil)
 			return
 		}
-		clearBrowserState(r.Context(), auth.User.ID, sourceURL)
-		clearEngineSourceState(r.Context(), auth.User.ID, definition)
-		_, _ = db.Exec(`DELETE FROM book_source_login_state WHERE user_id=? AND source_id=?`, auth.User.ID, id)
+		if source.Shared && auth.User.Role != "admin" {
+			writeAPI(w, 403, 403, "需要管理员权限", nil)
+			return
+		}
+		stateUserID := auth.User.ID
+		if source.Shared {
+			stateUserID = source.OwnerID
+		}
+		namespace := sourceNamespace(auth.User.ID, source)
+		clearBrowserState(r.Context(), namespace, source.URL)
+		clearEngineSourceState(r.Context(), namespace, string(source.Definition))
+		_, _ = db.Exec(`DELETE FROM book_source_login_state WHERE user_id=? AND source_id=?`, stateUserID, id)
 		writeAPI(w, 200, 200, "登录状态已清除", nil)
 		return
 	}
@@ -494,6 +540,15 @@ func handleBookSourceItem(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodPatch:
+		source, err := loadAccessibleBookSource(auth.User.ID, id)
+		if err != nil {
+			writeAPI(w, 404, 404, "书源不存在", nil)
+			return
+		}
+		if source.Shared && auth.User.Role != "admin" {
+			writeAPI(w, 403, 403, "需要管理员权限", nil)
+			return
+		}
 		var body struct {
 			Name    *string `json:"name"`
 			Group   *string `json:"group"`
@@ -504,7 +559,7 @@ func handleBookSourceItem(w http.ResponseWriter, r *http.Request) {
 		}
 		var name, group string
 		var enabled int
-		if db.QueryRow(`SELECT name,group_name,enabled FROM book_sources WHERE id=? AND user_id=?`, id, auth.User.ID).Scan(&name, &group, &enabled) != nil {
+		if db.QueryRow(`SELECT name,group_name,enabled FROM book_sources WHERE id=? AND user_id=?`, id, source.OwnerID).Scan(&name, &group, &enabled) != nil {
 			writeAPI(w, 404, 404, "书源不存在", nil)
 			return
 		}
@@ -521,20 +576,28 @@ func handleBookSourceItem(w http.ResponseWriter, r *http.Request) {
 				enabled = 0
 			}
 		}
-		_, _ = db.Exec(`UPDATE book_sources SET name=?,group_name=?,enabled=?,updated_at=? WHERE id=? AND user_id=?`, name, group, enabled, time.Now().Unix(), id, auth.User.ID)
+		_, _ = db.Exec(`UPDATE book_sources SET name=?,group_name=?,enabled=?,updated_at=? WHERE id=? AND user_id=?`, name, group, enabled, time.Now().Unix(), id, source.OwnerID)
 		writeAPI(w, 200, 200, "success", nil)
 	case http.MethodDelete:
-		var sourceURL, definition string
-		_ = db.QueryRow(`SELECT source_url,definition FROM book_sources WHERE id=? AND user_id=?`, id, auth.User.ID).Scan(&sourceURL, &definition)
-		result, _ := db.Exec(`DELETE FROM book_sources WHERE id=? AND user_id=?`, id, auth.User.ID)
+		source, err := loadAccessibleBookSource(auth.User.ID, id)
+		if err != nil {
+			writeAPI(w, 404, 404, "书源不存在", nil)
+			return
+		}
+		if source.Shared && auth.User.Role != "admin" {
+			writeAPI(w, 403, 403, "需要管理员权限", nil)
+			return
+		}
+		result, _ := db.Exec(`DELETE FROM book_sources WHERE id=? AND user_id=?`, id, source.OwnerID)
 		rows, _ := result.RowsAffected()
 		if rows == 0 {
 			writeAPI(w, 404, 404, "书源不存在", nil)
 			return
 		}
-		if sourceURL != "" {
-			clearBrowserState(r.Context(), auth.User.ID, sourceURL)
-			clearEngineSourceState(r.Context(), auth.User.ID, definition)
+		if source.URL != "" {
+			namespace := sourceNamespace(auth.User.ID, source)
+			clearBrowserState(r.Context(), namespace, source.URL)
+			clearEngineSourceState(r.Context(), namespace, string(source.Definition))
 		}
 		writeAPI(w, 200, 200, "success", nil)
 	default:
@@ -634,14 +697,10 @@ func loadSelectedSources(userID string, ids []string) ([]bookSource, error) {
 			}
 		}
 		if found == nil {
-			var item bookSource
-			var enabled int
-			var definition string
-			err := db.QueryRow(`SELECT id,type,name,group_name,source_url,enabled,definition,updated_at FROM book_sources WHERE id=? AND user_id=?`, id, userID).Scan(&item.ID, &item.Type, &item.Name, &item.Group, &item.URL, &enabled, &definition, &item.UpdatedAt)
+			item, err := loadAccessibleBookSource(userID, id)
 			if err != nil {
 				return nil, errors.New("书源不存在或不属于当前账号")
 			}
-			item.Enabled, item.Searchable, item.Definition = enabled == 1, true, json.RawMessage(definition)
 			found = &item
 		}
 		if !found.Enabled {
@@ -671,7 +730,7 @@ func searchOneSource(ctx context.Context, userID string, source bookSource, keyw
 }
 
 func searchLegado(ctx context.Context, userID string, source bookSource, keyword string, page int) ([]cachedSearchResult, error) {
-	payload, _ := json.Marshal(map[string]any{"source": json.RawMessage(source.Definition), "keyword": keyword, "page": page, "namespace": userID})
+	payload, _ := json.Marshal(map[string]any{"source": json.RawMessage(source.Definition), "keyword": keyword, "page": page, "namespace": sourceNamespace(userID, source)})
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, legadoEngineURL()+"/internal/search", strings.NewReader(string(payload)))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Engine-Token", os.Getenv("LEGADO_ENGINE_TOKEN"))
@@ -907,7 +966,11 @@ func handleListBookSubscriptions(w http.ResponseWriter, r *http.Request) {
 	if auth == nil {
 		return
 	}
-	rows, err := db.Query(`SELECT s.id,s.source_id,COALESCE(b.name,''),s.title,s.last_chapter_count,s.last_chapter_title,s.checked_at,s.updated_at FROM book_source_subscriptions s LEFT JOIN book_sources b ON b.id=s.source_id AND b.user_id=s.user_id WHERE s.user_id=? ORDER BY s.updated_at DESC`, auth.User.ID)
+	rows, err := db.Query(`SELECT s.id,s.source_id,COALESCE(b.name,''),s.title,s.last_chapter_count,s.last_chapter_title,s.checked_at,s.updated_at
+		FROM book_source_subscriptions s
+		LEFT JOIN shared_book_sources sb ON sb.source_id=s.source_id
+		LEFT JOIN book_sources b ON b.id=s.source_id AND (b.user_id=s.user_id OR sb.source_id IS NOT NULL)
+		WHERE s.user_id=? ORDER BY s.updated_at DESC`, auth.User.ID)
 	if err != nil {
 		writeAPI(w, 500, 500, "读取追更列表失败", nil)
 		return
@@ -961,10 +1024,11 @@ func handleBookSubscriptionItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func checkBookSubscription(w http.ResponseWriter, r *http.Request, userID, id string) {
-	var definition, raw, title, sourceName, sourceID string
+	var raw, title, sourceName, sourceID string
 	var previousCount int
 	var previousKey string
-	err := db.QueryRow(`SELECT s.source_id,s.title,s.raw_result,s.last_chapter_count,s.last_chapter_key,COALESCE(b.name,''),COALESCE(b.definition,'') FROM book_source_subscriptions s LEFT JOIN book_sources b ON b.id=s.source_id AND b.user_id=s.user_id AND b.enabled=1 WHERE s.id=? AND s.user_id=?`, id, userID).Scan(&sourceID, &title, &raw, &previousCount, &previousKey, &sourceName, &definition)
+	err := db.QueryRow(`SELECT source_id,title,raw_result,last_chapter_count,last_chapter_key FROM book_source_subscriptions WHERE id=? AND user_id=?`, id, userID).
+		Scan(&sourceID, &title, &raw, &previousCount, &previousKey)
 	if err != nil {
 		writeAPI(w, 404, 404, "书源已停用或不存在", nil)
 		return
@@ -987,11 +1051,13 @@ func checkBookSubscription(w http.ResponseWriter, r *http.Request, userID, id st
 		writeAPI(w, 200, 200, "检查完成", map[string]any{"id": id, "title": title, "source_name": "So Novel 中文聚合", "source_id": sourceID, "update_available": updateAvailable, "previous_count": previousCount, "chapter_count": chapterCount, "latest_chapter": current.LatestChapter})
 		return
 	}
-	if definition == "" {
+	source, err := loadAccessibleBookSource(userID, sourceID)
+	if err != nil || !source.Enabled {
 		writeAPI(w, 404, 404, "书源已停用或不存在", nil)
 		return
 	}
-	payload, _ := json.Marshal(map[string]any{"source": json.RawMessage(definition), "book": json.RawMessage(raw), "namespace": userID})
+	sourceName = source.Name
+	payload, _ := json.Marshal(map[string]any{"source": source.Definition, "book": json.RawMessage(raw), "namespace": sourceNamespace(userID, source)})
 	ctx, cancel := context.WithTimeout(r.Context(), 155*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, legadoEngineURL()+"/internal/check", strings.NewReader(string(payload)))
@@ -1031,7 +1097,8 @@ func checkBookSubscription(w http.ResponseWriter, r *http.Request, userID, id st
 func importBookSubscription(w http.ResponseWriter, userID, id string) {
 	var result cachedSearchResult
 	var raw string
-	err := db.QueryRow(`SELECT s.source_id,COALESCE(b.name,''),s.title,s.raw_result FROM book_source_subscriptions s LEFT JOIN book_sources b ON b.id=s.source_id AND b.user_id=s.user_id AND b.enabled=1 WHERE s.id=? AND s.user_id=?`, id, userID).Scan(&result.SourceID, &result.SourceName, &result.Title, &raw)
+	err := db.QueryRow(`SELECT source_id,title,raw_result FROM book_source_subscriptions WHERE id=? AND user_id=?`, id, userID).
+		Scan(&result.SourceID, &result.Title, &raw)
 	if err != nil {
 		writeAPI(w, 404, 404, "书源已停用或不存在", nil)
 		return
@@ -1042,6 +1109,11 @@ func importBookSubscription(w http.ResponseWriter, userID, id string) {
 		var value sonovelResult
 		_ = json.Unmarshal([]byte(raw), &value)
 		result.DownloadURL, result.Latest = value.URL, value.LatestChapter
+	} else if source, sourceErr := loadAccessibleBookSource(userID, result.SourceID); sourceErr != nil || !source.Enabled {
+		writeAPI(w, 404, 404, "书源已停用或不存在", nil)
+		return
+	} else {
+		result.SourceName = source.Name
 	}
 	job, status, err := startImportJob(userID, result, id)
 	if err != nil {
@@ -1144,12 +1216,12 @@ func runImportJob(ctx context.Context, id, userID string, result cachedSearchRes
 		runSoNovelImport(ctx, id, userID, result)
 		return
 	}
-	var definition string
-	if db.QueryRow(`SELECT definition FROM book_sources WHERE id=? AND user_id=?`, result.SourceID, userID).Scan(&definition) != nil {
+	source, err := loadAccessibleBookSource(userID, result.SourceID)
+	if err != nil {
 		updateImportJob(id, "failed", "failed", 0, 0, "书源不存在")
 		return
 	}
-	payload, _ := json.Marshal(map[string]any{"id": id, "source": json.RawMessage(definition), "book": result.Raw, "namespace": userID})
+	payload, _ := json.Marshal(map[string]any{"id": id, "source": source.Definition, "book": result.Raw, "namespace": sourceNamespace(userID, source)})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, legadoEngineURL()+"/internal/imports", strings.NewReader(string(payload)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Engine-Token", os.Getenv("LEGADO_ENGINE_TOKEN"))

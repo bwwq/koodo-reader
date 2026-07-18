@@ -17,12 +17,12 @@ import (
 )
 
 type sourceActionBinding struct {
-	UserID, SourceID, Script string
-	ExpiresAt                time.Time
+	AccountID, StateUserID, Namespace, SourceID, Script string
+	ExpiresAt                                            time.Time
 }
 
 type sourceActionOwner struct {
-	UserID, SourceID string
+	AccountID, StateUserID, SourceID string
 }
 
 type browserTicket struct {
@@ -98,21 +98,26 @@ func webviewRequest(ctx context.Context, method, path string, value any, output 
 }
 
 func handleSourceProfile(w http.ResponseWriter, r *http.Request, userID, sourceID string) {
-	var definition string
-	if db.QueryRow(`SELECT definition FROM book_sources WHERE id=? AND user_id=? AND type='legado'`, sourceID, userID).Scan(&definition) != nil {
+	source, err := loadAccessibleBookSource(userID, sourceID)
+	if err != nil || source.Type != "legado" {
 		writeAPI(w, 404, 404, "书源不存在", nil)
 		return
 	}
-	var source map[string]any
-	if json.Unmarshal([]byte(definition), &source) != nil {
+	definition := string(source.Definition)
+	stateUserID := userID
+	if source.Shared {
+		stateUserID = source.OwnerID
+	}
+	var definitionMap map[string]any
+	if json.Unmarshal([]byte(definition), &definitionMap) != nil {
 		writeAPI(w, 422, 422, "书源配置无效", nil)
 		return
 	}
-	uiRaw, _ := source["loginUi"].(string)
+	uiRaw, _ := definitionMap["loginUi"].(string)
 	var fields []map[string]any
 	if uiRaw != "" {
 		_ = json.Unmarshal([]byte(uiRaw), &fields)
-	} else if values, ok := source["loginUi"].([]any); ok {
+	} else if values, ok := definitionMap["loginUi"].([]any); ok {
 		encoded, _ := json.Marshal(values)
 		_ = json.Unmarshal(encoded, &fields)
 	}
@@ -128,13 +133,13 @@ func handleSourceProfile(w http.ResponseWriter, r *http.Request, userID, sourceI
 		delete(field, "action")
 		if strings.TrimSpace(action) != "" {
 			id := randomString(24)
-			sourceActionIDs[id] = sourceActionBinding{UserID: userID, SourceID: sourceID, Script: action, ExpiresAt: now.Add(30 * time.Minute)}
+			sourceActionIDs[id] = sourceActionBinding{AccountID: userID, StateUserID: stateUserID, Namespace: sourceNamespace(userID, source), SourceID: sourceID, Script: action, ExpiresAt: now.Add(30 * time.Minute)}
 			field["action_id"] = id
 		}
 	}
 	webviewMu.Unlock()
 	state := "unknown"
-	_ = db.QueryRow(`SELECT state FROM book_source_login_state WHERE user_id=? AND source_id=?`, userID, sourceID).Scan(&state)
+	_ = db.QueryRow(`SELECT state FROM book_source_login_state WHERE user_id=? AND source_id=?`, stateUserID, sourceID).Scan(&state)
 	writeAPI(w, 200, 200, "success", map[string]any{"fields": fields, "login_state": state})
 }
 
@@ -152,16 +157,16 @@ func handleSourceAction(w http.ResponseWriter, r *http.Request, userID, sourceID
 		delete(sourceActionIDs, body.ActionID)
 	}
 	webviewMu.Unlock()
-	if !ok || binding.UserID != userID || binding.SourceID != sourceID || time.Now().After(binding.ExpiresAt) {
+	if !ok || binding.AccountID != userID || binding.SourceID != sourceID || time.Now().After(binding.ExpiresAt) {
 		writeAPI(w, 403, 403, "操作已失效，请重新打开书源设置", nil)
 		return
 	}
-	var definition string
-	if db.QueryRow(`SELECT definition FROM book_sources WHERE id=? AND user_id=?`, sourceID, userID).Scan(&definition) != nil {
+	source, err := loadAccessibleBookSource(userID, sourceID)
+	if err != nil {
 		writeAPI(w, 404, 404, "书源不存在", nil)
 		return
 	}
-	payload := map[string]any{"source": json.RawMessage(definition), "action": binding.Script, "values": body.Values, "namespace": userID}
+	payload := map[string]any{"source": source.Definition, "action": binding.Script, "values": body.Values, "namespace": binding.Namespace}
 	encoded, _ := json.Marshal(payload)
 	request, _ := http.NewRequestWithContext(r.Context(), http.MethodPost, legadoEngineURL()+"/internal/actions", bytes.NewReader(encoded))
 	request.Header.Set("Content-Type", "application/json")
@@ -179,7 +184,7 @@ func handleSourceAction(w http.ResponseWriter, r *http.Request, userID, sourceID
 	}
 	id, _ := action["id"].(string)
 	webviewMu.Lock()
-	sourceActionOwners[id] = sourceActionOwner{UserID: userID, SourceID: sourceID}
+	sourceActionOwners[id] = sourceActionOwner{AccountID: userID, StateUserID: binding.StateUserID, SourceID: sourceID}
 	webviewMu.Unlock()
 	writeAPI(w, 202, 202, "操作已开始", action)
 }
@@ -192,7 +197,7 @@ func handleSourceActionEvents(w http.ResponseWriter, r *http.Request, id string)
 	webviewMu.Lock()
 	owner, ok := sourceActionOwners[id]
 	webviewMu.Unlock()
-	if !ok || owner.UserID != auth.User.ID {
+	if !ok || owner.AccountID != auth.User.ID {
 		writeAPI(w, 404, 404, "操作不存在", nil)
 		return
 	}
@@ -219,7 +224,7 @@ func handleSourceActionEvents(w http.ResponseWriter, r *http.Request, id string)
 		status, _ := state["status"].(string)
 		if status == "ready" || status == "failed" {
 			if status == "ready" {
-				_, _ = db.Exec(`INSERT INTO book_source_login_state(user_id,source_id,state,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id,source_id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at`, owner.UserID, owner.SourceID, "configured", time.Now().Unix())
+				_, _ = db.Exec(`INSERT INTO book_source_login_state(user_id,source_id,state,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id,source_id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at`, owner.StateUserID, owner.SourceID, "configured", time.Now().Unix())
 			}
 			fmt.Fprint(w, "data: [DONE]\n\n")
 			flusher.Flush()
@@ -246,13 +251,30 @@ type publicBrowserSession struct {
 }
 
 func listBrowserSessions(ctx context.Context, userID string) ([]publicBrowserSession, error) {
+	namespaces := []string{userID}
+	rows, _ := db.Query(`SELECT source_id FROM shared_book_sources ORDER BY source_id`)
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var sourceID string
+			if rows.Scan(&sourceID) == nil {
+				namespaces = append(namespaces, "shared-source:"+sourceID)
+			}
+		}
+	}
 	var sessions []publicBrowserSession
-	err := webviewRequest(ctx, http.MethodGet, "/sessions?namespace="+url.QueryEscape(userID), nil, &sessions)
+	for _, namespace := range namespaces {
+		var current []publicBrowserSession
+		if err := webviewRequest(ctx, http.MethodGet, "/sessions?namespace="+url.QueryEscape(namespace), nil, &current); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, current...)
+	}
 	for index := range sessions {
 		sessions[index].Namespace = ""
 		sessions[index].Source = ""
 	}
-	return sessions, err
+	return sessions, nil
 }
 
 func ownedBrowserSession(ctx context.Context, userID, sessionID string) (publicBrowserSession, error) {
@@ -260,7 +282,14 @@ func ownedBrowserSession(ctx context.Context, userID, sessionID string) (publicB
 	if err := webviewRequest(ctx, http.MethodGet, "/sessions/"+url.PathEscape(sessionID), nil, &session); err != nil {
 		return session, err
 	}
-	if session.Namespace != userID {
+	allowed := session.Namespace == userID
+	if !allowed && strings.HasPrefix(session.Namespace, "shared-source:") {
+		sourceID := strings.TrimPrefix(session.Namespace, "shared-source:")
+		var exists int
+		_ = db.QueryRow(`SELECT COUNT(*) FROM shared_book_sources WHERE source_id=?`, sourceID).Scan(&exists)
+		allowed = exists > 0
+	}
+	if !allowed {
 		return session, errors.New("browser session does not belong to account")
 	}
 	return session, nil

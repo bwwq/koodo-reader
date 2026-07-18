@@ -439,7 +439,7 @@ function SourceSearchDialog(props: Props) {
                 <div className={`source-row ${source.enabled ? "" : "disabled"}`} key={source.id}>
                   <label>
                     <input type="checkbox" checked={selected.includes(source.id)} disabled={!source.enabled} onChange={() => toggleSource(source.id)} />
-                    <span><b>{source.name}</b><small>{sourceTypeLabels[source.type] || source.type}{source.group ? ` · ${source.group}` : ""}</small></span>
+                    <span><b>{source.name}</b><small>{sourceTypeLabels[source.type] || source.type}{source.group ? ` · ${source.group}` : ""}{source.shared ? " · 服务器共享" : ""}</small></span>
                   </label>
                   <em className={sourceStatus[source.id]?.includes("失败") ? "error" : ""}>{sourceStatus[source.id] || ""}</em>
                   {source.compatibility && (
@@ -450,8 +450,8 @@ function SourceSearchDialog(props: Props) {
                   {!source.built_in && (
                     <span className="source-actions">
                       {(source.features?.includes("login") || source.features?.includes("webview")) && <button onClick={() => openSourceProfile(source)}>登录/设置</button>}
-                      <button onClick={() => setEnabled(source)}>{source.enabled ? "停用" : "启用"}</button>
-                      <button onClick={() => removeSource(source)}>删除</button>
+                      {!source.shared && <button onClick={() => setEnabled(source)}>{source.enabled ? "停用" : "启用"}</button>}
+                      {!source.shared && <button onClick={() => removeSource(source)}>删除</button>}
                     </span>
                   )}
                 </div>
