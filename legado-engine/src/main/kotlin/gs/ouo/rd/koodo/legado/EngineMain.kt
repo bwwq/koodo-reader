@@ -510,13 +510,18 @@ private fun localizeImages(
     return content to assets
 }
 
+internal fun decodeEmbeddedImageData(rawUrl: String, base64: Boolean): ByteArray {
+    val payload = rawUrl.substringAfter(',').substringBefore(',')
+    return if (base64) java.util.Base64.getDecoder().decode(payload)
+    else java.net.URLDecoder.decode(payload, "UTF-8").toByteArray(StandardCharsets.UTF_8)
+}
+
 private fun downloadImage(rawUrl: String, referer: String?, source: BookSource, namespace: String, index: Int): ImageAsset {
     if (rawUrl.startsWith("data:image/", true)) {
         val header = rawUrl.substringBefore(',')
         if (rawUrl.length - header.length > maxImageBytes * 2) throw IllegalStateException("image exceeds 20 MiB")
         val mediaType = header.substringAfter("data:").substringBefore(';').lowercase()
-        val bytes = if (header.contains(";base64", true)) java.util.Base64.getDecoder().decode(rawUrl.substringAfter(','))
-        else java.net.URLDecoder.decode(rawUrl.substringAfter(','), "UTF-8").toByteArray(StandardCharsets.UTF_8)
+        val bytes = decodeEmbeddedImageData(rawUrl, header.contains(";base64", true))
         if (bytes.size > maxImageBytes) throw IllegalStateException("image exceeds 20 MiB")
         val ext = imageExtension(mediaType) ?: throw IllegalStateException("unsupported embedded image type")
         return ImageAsset("images/page-$index.$ext", bytes, mediaType)

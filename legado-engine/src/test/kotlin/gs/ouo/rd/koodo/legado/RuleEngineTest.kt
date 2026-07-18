@@ -111,6 +111,14 @@ class RuleEngineTest {
     }
 
     @Test
+    fun decodesEmbeddedImagesWithoutLegadoOptions() {
+        val payload = "<svg>chapter review</svg>"
+        val encoded = Base64.getEncoder().encodeToString(payload.toByteArray())
+        val url = "data:image/svg+xml;base64,$encoded,{'type':'qtbzs'}"
+        assertEquals(payload, String(decodeEmbeddedImageData(url, true)))
+    }
+
+    @Test
     fun decodesMultilineDataUrlsReturnedBySourceJavaScript() {
         val payload = "{\"ok\":true}"
         val encoded = Base64.getMimeEncoder(8, "\n".toByteArray()).encodeToString(payload.toByteArray())
