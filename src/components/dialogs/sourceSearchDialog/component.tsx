@@ -437,23 +437,32 @@ function SourceSearchDialog(props: Props) {
               )}
               {!loadingSources && !sourceError && sources.map((source) => (
                 <div className={`source-row ${source.enabled ? "" : "disabled"}`} key={source.id}>
-                  <label>
+                  <label className="source-choice">
                     <input type="checkbox" checked={selected.includes(source.id)} disabled={!source.enabled} onChange={() => toggleSource(source.id)} />
-                    <span><b>{source.name}</b><small>{sourceTypeLabels[source.type] || source.type}{source.group ? ` · ${source.group}` : ""}{source.shared ? " · 服务器共享" : ""}</small></span>
-                  </label>
-                  <em className={sourceStatus[source.id]?.includes("失败") ? "error" : ""}>{sourceStatus[source.id] || ""}</em>
-                  {source.compatibility && (
-                    <small className={`source-compatibility ${source.compatibility.status}`} title={(source.compatibility.reasons || []).join("\n")}>
-                      {source.compatibility.status === "compatible" ? "兼容" : source.compatibility.status === "partial" ? "部分兼容" : "不兼容"}
-                    </small>
-                  )}
-                  {!source.built_in && (
-                    <span className="source-actions">
-                      {(source.features?.includes("login") || source.features?.includes("webview")) && <button onClick={() => openSourceProfile(source)}>登录/设置</button>}
-                      {!source.shared && <button onClick={() => setEnabled(source)}>{source.enabled ? "停用" : "启用"}</button>}
-                      {!source.shared && <button onClick={() => removeSource(source)}>删除</button>}
+                    <span className="source-copy">
+                      <b className="source-name" title={source.name}>{source.name}</b>
+                      <span className="source-meta" title={`${sourceTypeLabels[source.type] || source.type}${source.group ? ` · ${source.group}` : ""}${source.shared ? " · 服务器共享" : ""}`}>
+                        {sourceTypeLabels[source.type] || source.type}{source.group ? ` · ${source.group}` : ""}{source.shared ? " · 服务器共享" : ""}
+                      </span>
                     </span>
-                  )}
+                  </label>
+                  <div className="source-row-footer">
+                    <span className="source-state" aria-live="polite">
+                      {sourceStatus[source.id] && <em className={sourceStatus[source.id].includes("失败") ? "error" : ""}>{sourceStatus[source.id]}</em>}
+                      {source.compatibility && (
+                        <span className={`source-compatibility ${source.compatibility.status}`} title={(source.compatibility.reasons || []).join("\n")}>
+                          {source.compatibility.status === "compatible" ? "兼容" : source.compatibility.status === "partial" ? "部分兼容" : "不兼容"}
+                        </span>
+                      )}
+                    </span>
+                    {!source.built_in && (
+                      <span className="source-actions">
+                        {(source.features?.includes("login") || source.features?.includes("webview")) && <button type="button" onClick={() => openSourceProfile(source)}>登录/设置</button>}
+                        {!source.shared && <button type="button" onClick={() => setEnabled(source)}>{source.enabled ? "停用" : "启用"}</button>}
+                        {!source.shared && <button type="button" onClick={() => removeSource(source)}>删除</button>}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

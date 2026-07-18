@@ -28,21 +28,25 @@
 .source-picker-title { padding: 12px 14px 8px; display: flex; justify-content: space-between; }
 .source-picker-title button { margin-left: 6px; padding: 4px 7px; font-size: 11px; }
 .source-list { flex: 1; overflow: auto; padding: 0 8px; }
-.source-row { padding: 9px 7px; border-radius: 8px; }
+.source-row { padding: 10px 8px; border-radius: 8px; }
 .source-row:hover { background: rgba(128,128,128,.08); }
 .source-row.disabled { opacity: .55; }
-.source-row label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
-.source-row label span { min-width: 0; display: flex; flex-direction: column; }
-.source-row label b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.source-row small { font-size: 10px; opacity: .5; margin-top: 2px; }
-.source-row em { margin-left: 25px; font-size: 10px; opacity: .65; font-style: normal; }
+.source-choice { min-width: 0; display: grid; grid-template-columns: 18px minmax(0,1fr); gap: 8px; align-items: start; cursor: pointer; }
+.source-choice input { width: 16px; height: 16px; margin: 2px 0 0; }
+.source-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; font-family: inherit; letter-spacing: 0; }
+.source-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 18px; font-family: inherit; letter-spacing: 0; }
+.source-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; line-height: 15px; opacity: .58; font-family: inherit; letter-spacing: 0; }
+.source-row-footer { min-height: 28px; margin: 7px 0 0 26px; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.source-state { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.source-row em { font-size: 10px; line-height: 16px; opacity: .65; font-style: normal; }
 .source-row em.error { color: #e05252; opacity: 1; }
-.source-compatibility { display: inline-block; margin: 3px 0 0 25px; font-size: 10px; }
+.source-compatibility { display: inline-block; font-size: 10px; line-height: 16px; white-space: nowrap; }
 .source-compatibility.compatible { color: #26845b; }
 .source-compatibility.partial { color: #a86d12; }
 .source-compatibility.incompatible { color: #d14b4b; }
-.source-actions { float: right; margin-top: -24px; }
-.source-actions button { font-size: 10px; padding: 3px 5px; margin-left: 3px; }
+.source-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; position: relative; z-index: 1; }
+.source-actions button { min-height: 28px; padding: 5px 8px; border: 1px solid rgba(128,128,128,.22); background: rgba(128,128,128,.16); font: inherit; font-size: 10px; line-height: 16px; letter-spacing: 0; white-space: nowrap; pointer-events: auto; }
+.source-actions button:hover { background: rgba(128,128,128,.26); }
 .source-import { padding: 10px; border-top: 1px solid rgba(128,128,128,.16); }
 .source-import > button { width: 100%; padding: 8px; margin-bottom: 7px; }
 .source-import > div { display: flex; gap: 5px; }
